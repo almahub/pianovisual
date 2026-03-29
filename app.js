@@ -62,6 +62,8 @@ const el = {
   metaPlaylist: document.getElementById("metaPlaylist"),
   convertBtn: document.getElementById("convertBtn"),
   saveBatchBtn: document.getElementById("saveBatchBtn"),
+  importJsonBtn: document.getElementById("importJsonBtn"),
+  importJsonFileInput: document.getElementById("importJsonFileInput"),
   cancelImportBtn: document.getElementById("cancelImportBtn"),
   downloadBtn: document.getElementById("downloadBtn"),
   duplicatePolicySelect: document.getElementById("duplicatePolicySelect"),
@@ -2923,6 +2925,7 @@ async function importArchiveFiles(fileList) {
   finally {
     showLoading(false);
     el.archiveFileInput.value = "";
+    if (el.importJsonFileInput) el.importJsonFileInput.value = "";
   }
 }
 
@@ -3148,6 +3151,8 @@ function bindEvents() {
     }
   });
   el.saveBatchBtn.addEventListener("click", saveBatchToLibrary);
+  el.importJsonBtn.addEventListener("click", () => el.importJsonFileInput.click());
+  el.importJsonFileInput.addEventListener("change", () => importArchiveFiles(el.importJsonFileInput.files));
   el.cancelImportBtn.addEventListener("click", () => {
     state.importCancelled = true;
     setImportStatus("Annullamento import richiesto...", "error");
