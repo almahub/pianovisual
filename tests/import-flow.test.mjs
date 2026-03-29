@@ -179,7 +179,87 @@ test('duplicate inside same batch imports first and skips second', async () => {
   const result = await api('/api/library/import-batch', { method: 'POST', body: JSON.stringify({ items: [a, b] }) });
   assert.equal(result.importedCount, 1);
   assert.equal(result.skipped.length, 1);
+  assert.equal(Array.isArray(result.report), true);
+  assert.equal(result.report.length >= 2, true);
 
   const db = await api('/api/library');
   assert.equal(db.songs.length, 1);
+});
+
+test('import-json-archive skip duplicate keeps original', async () => {
+  const first = {
+    fileName: 'arch-a.json',
+    jsonData: {
+      supportingTracks: [{ notes: [{ midi: 60, time: 0, velocity: 0.7, duration: 0.5 }], myInstrument: -5, theirInstrument: 0 }],
+      start_time: 0,
+      song_length: 1,
+      resolution: 480,
+      tempos: [{ bpm: 120, ticks: 0, time: 0 }],
+      keySignatures: [{ key: 'C', scale: 'major', ticks: 0 }],
+      timeSignatures: [{ ticks: 0, timeSignature: [4, 4], measures: 0 }],
+      name: 'Archive Song',
+      artist: 'Archive Artist',
+    },
+  };
+  await api('/api/library/import-json-archive', { method: 'POST', body: JSON.stringify({ items: [first] }) });
+
+  const dup = structuredClone(first);
+  dup.fileName = 'arch-dup.json';
+  const result = await api('/api/library/import-json-archive', {
+    method: 'POST',
+    body: JSON.stringify({ items: [dup], conflictPolicy: 'skip' }),
+  });
+  assert.equal(result.importedCount, 0);
+  assert.equal(result.overwrittenCount, 0);
+  assert.equal(result.skipped.length, 1);
+  assert.equal(result.report.some((r) => r.status === 'skipped'), true);
+
+  const db = await api('/api/library');
+  assert.equal(db.songs.length, 1);
+  assert.equal(db.songs[0].title, 'Archive Song');
+});
+
+test('import-json-archive overwrite duplicate updates metadata', async () => {
+  const first = {
+    fileName: 'arch-a.json',
+    jsonData: {
+      supportingTracks: [{ notes: [{ midi: 60, time: 0, velocity: 0.7, duration: 0.5 }], myInstrument: -5, theirInstrument: 0 }],
+      start_time: 0,
+      song_length: 1,
+      resolution: 480,
+      tempos: [{ bpm: 120, ticks: 0, time: 0 }],
+      keySignatures: [{ key: 'C', scale: 'major', ticks: 0 }],
+      timeSignatures: [{ ticks: 0, timeSignature: [4, 4], measures: 0 }],
+      name: 'Archive Song',
+      artist: 'Archive Artist',
+    },
+  };
+  await api('/api/library/import-json-archive', { method: 'POST', body: JSON.stringify({ items: [first] }) });
+
+  const second = {
+    fileName: 'arch-b.json',
+    jsonData: {
+      supportingTracks: [{ notes: [{ midi: 62, time: 0, velocity: 0.7, duration: 0.5 }], myInstrument: -5, theirInstrument: 0 }],
+      start_time: 0,
+      song_length: 2,
+      resolution: 480,
+      tempos: [{ bpm: 90, ticks: 0, time: 0 }],
+      keySignatures: [{ key: 'G', scale: 'major', ticks: 0 }],
+      timeSignatures: [{ ticks: 0, timeSignature: [4, 4], measures: 0 }],
+      name: 'Archive Song',
+      artist: 'Archive Artist',
+    },
+  };
+  const result = await api('/api/library/import-json-archive', {
+    method: 'POST',
+    body: JSON.stringify({ items: [second], conflictPolicy: 'overwrite' }),
+  });
+  assert.equal(result.importedCount, 1);
+  assert.equal(result.overwrittenCount, 1);
+  assert.equal(result.report.some((r) => r.status === 'overwritten'), true);
+
+  const db = await api('/api/library');
+  assert.equal(db.songs.length, 1);
+  assert.equal(db.songs[0].bpm, 90);
+  assert.equal(db.songs[0].key, 'G major');
 });

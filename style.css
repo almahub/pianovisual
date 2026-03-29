@@ -419,26 +419,31 @@ textarea {
   padding-top: 10px;
   border-top: 1px solid #252525;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 8px;
 }
 
 .detail-panel .detail-actions:not(.inline) .btn {
   width: 100%;
-  min-height: 36px;
-  justify-content: center;
+  min-height: 38px;
+  justify-content: flex-start;
+  padding-left: 12px;
+}
+
+.detail-actions-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
 }
 
 .meta-edit-form {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .meta-edit-block {
   border: 1px solid #2a2a2a;
   border-radius: 10px;
   background: #121212;
-  padding: 8px;
+  padding: 10px;
 }
 
 .meta-edit-block h4 {
@@ -500,6 +505,7 @@ textarea {
 .detail-actions.inline {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  gap: 8px;
 }
 
 textarea {
@@ -660,6 +666,38 @@ tbody tr.active {
   border: 1px solid #2a2a2a;
   border-radius: 10px;
   background: #0d1e2a;
+}
+
+.visualizer-legend {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.viz-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #313131;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 0.74rem;
+  color: #cfd8e4;
+  background: #171717;
+  opacity: 0.74;
+}
+
+.viz-legend-item.active {
+  opacity: 1;
+  border-color: #456b57;
+}
+
+.viz-legend-item i {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  display: inline-block;
 }
 
 .btn,
@@ -962,6 +1000,16 @@ tbody tr.active {
   border-top-color: #d8e0ec;
 }
 
+:root[data-theme="light"] .viz-legend-item {
+  color: #334155;
+  background: #f4f8ff;
+  border-color: #d5deeb;
+}
+
+:root[data-theme="light"] .viz-legend-item.active {
+  border-color: #89b89f;
+}
+
 :root[data-theme="light"] tbody tr:hover,
 :root[data-theme="light"] tbody tr.active {
   background: #edf2f9;
@@ -1066,6 +1114,10 @@ tbody tr.active {
 
   .detail-panel .detail-actions:not(.inline) {
     grid-template-columns: 1fr;
+  }
+
+  .detail-actions-grid {
+    grid-template-columns: 1fr !important;
   }
 
   .topbar {

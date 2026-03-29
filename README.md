@@ -4,9 +4,10 @@ Tool desktop/web locale per convertire **piu file MIDI in JSON compatibile Piano
 
 ## A cosa serve
 - Conversione batch `MIDI -> JSON` (non uno alla volta)
+- Report import dettagliato (importato/sovrascritto/scartato/errore) scaricabile
 - Organizzazione libreria (playlist, tag, preferiti, metadata)
 - Preview/visualizer e strumenti di studio
-- Export archivio JSON
+- Import/Export archivio JSON (anche ZIP) con gestione conflitti
 
 ## Per chi e pensato
 - Studenti di pianoforte

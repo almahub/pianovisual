@@ -66,8 +66,11 @@ const el = {
   importJsonFileInput: document.getElementById("importJsonFileInput"),
   cancelImportBtn: document.getElementById("cancelImportBtn"),
   downloadBtn: document.getElementById("downloadBtn"),
+  downloadImportReportBtn: document.getElementById("downloadImportReportBtn"),
   duplicatePolicySelect: document.getElementById("duplicatePolicySelect"),
   batchDedupSelect: document.getElementById("batchDedupSelect"),
+  archiveConflictPolicySelect: document.getElementById("archiveConflictPolicySelect"),
+  archiveDedupPolicySelect: document.getElementById("archiveDedupPolicySelect"),
   batchProgressWrap: document.getElementById("batchProgressWrap"),
   batchProgressLabel: document.getElementById("batchProgressLabel"),
   batchProgressPct: document.getElementById("batchProgressPct"),
@@ -114,6 +117,7 @@ const el = {
   pauseBtn: document.getElementById("pauseBtn"),
   playerSpeedSelect: document.getElementById("playerSpeedSelect"),
   visualizerCanvas: document.getElementById("visualizerCanvas"),
+  visualizerLegend: document.getElementById("visualizerLegend"),
   footerTrackTitle: document.getElementById("footerTrackTitle"),
   footerTrackArtist: document.getElementById("footerTrackArtist"),
   miniVisualizer: document.getElementById("miniVisualizer"),
@@ -168,6 +172,7 @@ const state = {
   duplicateCandidates: [],
   duplicateResolution: "ask",
   importCancelled: false,
+  lastImportReport: null,
   selectedSongIds: new Set(),
   quickMenuSongId: "",
   selectedPlaylistId: "",
@@ -186,6 +191,14 @@ const state = {
     miniBars: [5, 10, 8, 14, 6, 11, 7],
     availableInstruments: [],
     activeInstrumentsBySong: {},
+    minMidi: 21,
+    maxMidi: 108,
+    renderCache: {
+      windowStart: 0,
+      windowEnd: 0,
+      lastRenderMs: 0,
+      visualizerFps: 30,
+    },
   },
 };
 
@@ -1417,6 +1430,7 @@ function renderDetail() {
     el.emptyDetail.classList.remove("hidden");
     el.detailContent.classList.add("hidden");
     el.detailInstrumentsBadges.innerHTML = "";
+    if (el.visualizerLegend) el.visualizerLegend.innerHTML = "";
     if (el.footerTrackTitle) el.footerTrackTitle.textContent = "Nessun brano";
     if (el.footerTrackArtist) el.footerTrackArtist.textContent = "-";
     return;
@@ -1428,6 +1442,7 @@ function renderDetail() {
   const playlists = collections.filter((c) => c.type === "playlist" && !c.smartRule).map((c) => c.name);
   const instruments = instrumentsForSong(song);
   const activeSet = new Set(state.player.activeInstrumentsBySong[song.id] || instruments);
+  const activeCount = instruments.filter((name) => activeSet.has(name)).length;
 
   el.emptyDetail.classList.add("hidden");
   el.detailContent.classList.remove("hidden");
@@ -1441,7 +1456,7 @@ function renderDetail() {
     `<li><strong>Tonalita:</strong> ${escapeHtml(song.key || "-")}</li>`,
     `<li><strong>BPM:</strong> ${escapeHtml(song.bpm || "-")}</li>`,
     `<li><strong>Durata:</strong> ${secondsToClock(song.duration || 0)}</li>`,
-    `<li><strong>Tracce attive:</strong> ${instruments.length || 0}</li>`,
+    `<li><strong>Tracce attive:</strong> ${activeCount} / ${instruments.length || 0}</li>`,
     `<li><strong>Strumenti:</strong> ${escapeHtml(instruments.join(", ") || "-")}</li>`,
     `<li><strong>Tag:</strong> ${escapeHtml(tags.join(", ") || "-")}</li>`,
     `<li><strong>Playlist:</strong> ${escapeHtml(playlists.join(", ") || "-")}</li>`,
@@ -1456,6 +1471,7 @@ function renderDetail() {
         })
         .join("")
     : '<span class="instrument-badge muted">Nessuno strumento rilevato</span>';
+  renderVisualizerLegend(song.id);
 
   el.editTitle.value = song.title || "";
   el.editArtist.value = song.artist || "";
@@ -1589,6 +1605,58 @@ function dedupeBatchItems(items, mode = "keep_first") {
       for (const k of keys) keyToIndex.set(k, conflictIdx);
     } else {
       dropped.push({ item, reason: "duplicato batch (tenuto primo)" });
+    }
+  }
+
+  return { kept, dropped };
+}
+
+function dedupeJsonArchiveItems(items, mode = "keep_first") {
+  const kept = [];
+  const dropped = [];
+  const keyToIndex = new Map();
+
+  const buildKeys = (entry) => {
+    const keys = [];
+    const fileName = normalizeText(entry?.fileName || "");
+    if (fileName) keys.push(`file:${fileName}`);
+    const data = entry?.jsonData;
+    if (data && typeof data === "object") {
+      const songName = normalizeText(data?.name || "");
+      const artist = normalizeText(data?.artist || "");
+      if (songName && artist) keys.push(`ta:${songName}||${artist}`);
+      if (songName) keys.push(`title:${songName}`);
+    }
+    return keys;
+  };
+
+  for (const item of items) {
+    const keys = buildKeys(item);
+    let conflictIdx = -1;
+    for (const key of keys) {
+      if (keyToIndex.has(key)) {
+        conflictIdx = keyToIndex.get(key);
+        break;
+      }
+    }
+
+    if (conflictIdx === -1) {
+      kept.push(item);
+      const idx = kept.length - 1;
+      for (const key of keys) keyToIndex.set(key, idx);
+      continue;
+    }
+
+    if (mode === "keep_last") {
+      const prev = kept[conflictIdx];
+      if (prev) dropped.push({ item: prev, reason: "duplicato interno archivio (tenuto ultimo)" });
+      kept[conflictIdx] = item;
+      for (const [k, v] of keyToIndex.entries()) {
+        if (v === conflictIdx) keyToIndex.delete(k);
+      }
+      for (const key of keys) keyToIndex.set(key, conflictIdx);
+    } else {
+      dropped.push({ item, reason: "duplicato interno archivio (tenuto primo)" });
     }
   }
 
@@ -1842,9 +1910,6 @@ async function saveBatchToLibrary() {
     const playlistName = el.metaPlaylist.value.trim();
     const playlist = await ensurePlaylist(playlistName);
     const playlistId = playlist?.id || null;
-    let importedCount = 0;
-    let skippedCount = 0;
-    let overwrittenCount = 0;
 
     let policy = el.duplicatePolicySelect?.value || "ask";
     let perFileDecisions = {};
@@ -1861,10 +1926,9 @@ async function saveBatchToLibrary() {
     }
 
     const overwriteAll = policy === "overwrite_all";
-    let itemsToImport = state.batchItems;
+    let itemsToImport = state.batchItems.slice();
     if (policy === "skip_all") {
       itemsToImport = state.batchItems.filter((it) => !(it.duplicateInfo && it.duplicateInfo.duplicate));
-      skippedCount += state.batchItems.length - itemsToImport.length;
     } else if (policy === "per_file") {
       const kept = [];
       for (const it of state.batchItems) {
@@ -1877,8 +1941,6 @@ async function saveBatchToLibrary() {
         const decision = perFileDecisions[key] || "skip";
         if (decision === "overwrite") {
           kept.push(it);
-        } else {
-          skippedCount += 1;
         }
       }
       itemsToImport = kept;
@@ -1889,39 +1951,41 @@ async function saveBatchToLibrary() {
       const msg = "Nessun file da importare (tutti saltati).";
       setImportStatus(msg, "ok");
       toast(msg, "ok");
+      setLastImportReport({
+        kind: "midi-batch",
+        createdAt: new Date().toISOString(),
+        summary: { total: state.batchItems.length, imported: 0, overwritten: 0, skipped: state.batchItems.length, errored: 0 },
+        report: state.batchItems.map((it) => ({
+          sourceFileName: it.sourceFileName,
+          status: "skipped",
+          reason: "policy skip_all/per_file",
+        })),
+      });
       return;
     }
 
-    state.importCancelled = false;
-    el.cancelImportBtn.classList.remove("hidden");
-    const total = itemsToImport.length;
-    for (let i = 0; i < total; i += 1) {
-      if (state.importCancelled) {
-        skippedCount += total - i;
-        break;
-      }
-      const it = itemsToImport[i];
-      const payloadItem = {
-        sourceFileName: it.sourceFileName,
-        midiBase64: it.midiBase64,
-        jsonData: it.jsonData,
-        overwrite: policy === "per_file" && Boolean(it.duplicateInfo?.duplicate),
-        overwriteSongId: it.duplicateInfo?.duplicate?.id || "",
-        song: {
-          ...it.song,
-          collectionIds: playlistId ? [playlistId] : [],
-        },
-      };
-      setBatchProgress((i / total) * 100, `Import ${i + 1}/${total}: ${it.sourceFileName}`);
-      await nextFrame();
-      const result = await api("/api/library/import-batch", {
-        method: "POST",
-        body: JSON.stringify({ overwrite: overwriteAll, items: [payloadItem] }),
-      });
-      importedCount += Number(result.importedCount || 0);
-      overwrittenCount += Number(result.overwrittenCount || 0);
-      skippedCount += Array.isArray(result.skipped) ? result.skipped.length : 0;
-    }
+    const payloadItems = itemsToImport.map((it) => ({
+      sourceFileName: it.sourceFileName,
+      midiBase64: it.midiBase64,
+      jsonData: it.jsonData,
+      overwrite: policy === "per_file" && Boolean(it.duplicateInfo?.duplicate),
+      overwriteSongId: it.duplicateInfo?.duplicate?.id || "",
+      song: {
+        ...it.song,
+        collectionIds: playlistId ? [playlistId] : [],
+      },
+    }));
+
+    setBatchProgress(25, `Invio batch al server (${payloadItems.length} file)...`);
+    await nextFrame();
+    const result = await api("/api/library/import-batch", {
+      method: "POST",
+      body: JSON.stringify({
+        overwrite: overwriteAll,
+        batchDuplicatePolicy: el.batchDedupSelect?.value || "keep_first",
+        items: payloadItems,
+      }),
+    });
     setBatchProgress(100, "Import completato");
 
     await refreshDb();
@@ -1937,11 +2001,27 @@ async function saveBatchToLibrary() {
     setRecognitionFields(null);
     el.midiFileInput.value = "";
 
-    const msg = skippedCount
-      ? `Import completato: ${importedCount} salvati, ${overwrittenCount} sovrascritti, ${skippedCount} saltati.`
-      : `Import completato: ${importedCount} brani salvati (${overwrittenCount} sovrascritti).`;
-    setImportStatus(msg, "ok");
-    toast(msg, "ok");
+    const importedCount = Number(result.importedCount || 0);
+    const overwrittenCount = Number(result.overwrittenCount || 0);
+    const reportRows = Array.isArray(result.report) ? result.report : [];
+    const skippedCount = reportRows.filter((r) => r.status === "skipped").length;
+    const erroredCount = reportRows.filter((r) => r.status === "error").length;
+    setLastImportReport({
+      kind: "midi-batch",
+      createdAt: new Date().toISOString(),
+      summary: {
+        total: payloadItems.length,
+        imported: importedCount,
+        overwritten: overwrittenCount,
+        skipped: skippedCount,
+        errored: erroredCount,
+      },
+      report: reportRows,
+    });
+
+    const msg = `Import completato: ${importedCount} salvati, ${overwrittenCount} sovrascritti, ${skippedCount} saltati, ${erroredCount} errori.`;
+    setImportStatus(msg, erroredCount > 0 ? "error" : "ok");
+    toast(msg, erroredCount > 0 ? "error" : "ok");
   } catch (error) {
     toast(error.message, "error");
     setImportStatus(`Errore import: ${error.message}`, "error");
@@ -1978,64 +2058,40 @@ async function resolveRemoteUrl() {
     if (!resolved.midiBase64) {
       setBatchProgress(100, "URL analizzato (metadata)");
       setImportStatus(resolved.message || "Metadata trovati, ma nessun MIDI diretto.", "ok");
-      toast("Metadata acquisiti dall'URL", "ok");
-      setTimeout(() => showBatchProgress(false), 700);
       return;
     }
 
-    setBatchProgress(35, "Download MIDI remoto...");
-    await nextFrame();
+    const sourceName = resolved.fileName || "remote.mid";
     const arr = base64ToArrayBuffer(resolved.midiBase64);
     const existingSongs = state.db?.songs || [];
     const seenHashes = new Set();
     const seenTitleArtist = new Set();
-    const sourceName = resolved.fileName || "remote.mid";
+    const titleOverride = el.metaTitle.value.trim();
     const { item, inferredLine } = await buildBatchItemFromArrayBuffer({
       sourceName,
       arrBuffer: arr,
       existingSongs,
       seenHashes,
       seenTitleArtist,
+      titleOverride,
     });
-
-    if (meta.title) item.song.title = meta.title;
-    if (meta.artist) item.song.artist = meta.artist;
-    if (meta.composer) item.song.composer = meta.composer;
-    if (resolved.fileHash) item.fileHash = resolved.fileHash;
 
     state.batchItems = [item];
     state.preview = item;
-    state.duplicateCandidates = [];
-    if (item.duplicateInfo.duplicate || item.duplicateInfo.duplicateInBatch) {
-      state.duplicateCandidates.push({
-        fileName: sourceName,
-        existingSongId: item.duplicateInfo.duplicate?.id || "",
-        existingTitle: item.duplicateInfo.duplicate?.title || "-",
-        existingArtist: item.duplicateInfo.duplicate?.artist || "-",
-        reason: item.duplicateInfo.reason,
-      });
-      alert(
-        `Attenzione: possibile duplicato trovato.\n${sourceName} -> ${item.duplicateInfo.reason} (${
-          item.duplicateInfo.duplicate?.title || "-"
-        } / ${item.duplicateInfo.duplicate?.artist || "-"})\nDeciderai in import se sovrascrivere o saltare questo file.`,
-      );
-    }
-
-    el.filenameInsights.value = `${inferredLine}\nURL: ${url}${resolved.resolvedMidiUrl ? `\nMIDI: ${resolved.resolvedMidiUrl}` : ""}`;
+    state.duplicateCandidates = getExternalDuplicateCandidates(state.batchItems);
     el.jsonOutput.value = JSON.stringify(item.jsonData, null, 2);
+    el.filenameInsights.value = inferredLine;
     el.saveBatchBtn.disabled = false;
     el.downloadBtn.disabled = false;
-    setBatchProgress(100, "MIDI remoto pronto");
-    setImportStatus("URL risolto e MIDI pronto per il salvataggio in libreria.", "ok");
-    toast("MIDI caricato da URL", "ok");
-    setTimeout(() => showBatchProgress(false), 700);
+    setBatchProgress(100, "URL convertito");
+    setImportStatus(`MIDI caricato da URL: ${sourceName}`, "ok");
   } catch (error) {
-    showBatchProgress(false);
     setImportStatus(`Errore URL: ${error.message}`, "error");
-    toast(`Errore URL: ${error.message}`, "error");
+    toast(error.message, "error");
+  } finally {
+    setTimeout(() => showBatchProgress(false), 600);
   }
 }
-
 function downloadPreviewJson() {
   if (!state.preview) return;
   const blob = new Blob([JSON.stringify(state.preview.jsonData, null, 2)], { type: "application/json" });
@@ -2432,6 +2488,7 @@ function resetVisualizer() {
   ctx.fillStyle = "#89b6d6";
   ctx.font = "12px Space Grotesk";
   ctx.fillText("Seleziona un brano e premi Play", 12, 20);
+  if (el.visualizerLegend) el.visualizerLegend.innerHTML = "";
 }
 
 function animateMiniVisualizer() {
@@ -2500,6 +2557,42 @@ function buildPlayableNotesFromTracks(trackGroups, activeInstruments) {
   return { notes, duration };
 }
 
+function renderVisualizerLegend(songId) {
+  if (!el.visualizerLegend) return;
+  const song = getSongById(songId);
+  if (!song) {
+    el.visualizerLegend.innerHTML = "";
+    return;
+  }
+  const instruments = instrumentsForSong(song);
+  if (instruments.length === 0) {
+    el.visualizerLegend.innerHTML = '<span class="mini-note">Nessuna traccia strumento disponibile</span>';
+    return;
+  }
+  const active = new Set(state.player.activeInstrumentsBySong[song.id] || instruments);
+  el.visualizerLegend.innerHTML = instruments
+    .map((name) => {
+      const on = active.has(name);
+      const swatch = colorFromInstrument(name, false);
+      return `<span class="viz-legend-item${on ? " active" : ""}">
+        <i style="background:${escapeHtml(swatch)}"></i>
+        <span>${escapeHtml(name)}</span>
+      </span>`;
+    })
+    .join("");
+}
+
+function lowerBoundNoteTime(notes, target) {
+  let lo = 0;
+  let hi = notes.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((notes[mid]?.time || 0) < target) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 async function loadSelectedSongForPlayer(forceReload = false) {
   const song = getSongById(state.selectedSongId);
   if (!song) return false;
@@ -2527,6 +2620,8 @@ async function loadSelectedSongForPlayer(forceReload = false) {
 
   state.player.notes = notes;
   state.player.duration = duration;
+  state.player.minMidi = notes.length ? Math.min(...notes.map((n) => n.midi)) : 21;
+  state.player.maxMidi = notes.length ? Math.max(...notes.map((n) => n.midi)) : 108;
   state.player.loadedSongId = song.id;
   state.player.loadedSongJsonPath = song.jsonPath || "";
   state.player.availableInstruments = availableInstruments;
@@ -2550,21 +2645,27 @@ function drawVisualizerFrame() {
   }
 
   const current = Tone.Transport.seconds;
-  const minMidi = Math.min(...notes.map((n) => n.midi));
-  const maxMidi = Math.max(...notes.map((n) => n.midi));
+  const lookBehind = 1.4;
+  const lookAhead = 5.5;
+  const startIdx = Math.max(0, lowerBoundNoteTime(notes, current - lookBehind) - 24);
+  let endIdx = lowerBoundNoteTime(notes, current + lookAhead);
+  endIdx = Math.min(notes.length, endIdx + 48);
+  const visibleNotes = notes.slice(startIdx, endIdx);
+
+  const minMidi = state.player.minMidi;
+  const maxMidi = state.player.maxMidi;
   const pitchRange = Math.max(1, maxMidi - minMidi + 1);
   const padX = 12;
   const laneWidth = (canvas.width - padX * 2) / pitchRange;
-  const keyboardHeight = 34;
+  const keyboardHeight = 52;
   const strikeY = canvas.height - keyboardHeight;
-  const pxPerSecond = 78;
+  const pxPerSecond = 92;
   const activeColorByMidi = new Map();
-  for (const n of notes) {
+  for (const n of visibleNotes) {
     if (n.time <= current && n.time + n.duration >= current && !activeColorByMidi.has(n.midi)) {
       activeColorByMidi.set(n.midi, colorFromInstrument(n.instrument, false));
     }
   }
-  const activeMidis = new Set(activeColorByMidi.keys());
 
   for (let midi = minMidi; midi <= maxMidi; midi += 1) {
     const lane = midi - minMidi;
@@ -2573,7 +2674,7 @@ function drawVisualizerFrame() {
     ctx.fillRect(x, 0, laneWidth, strikeY);
   }
 
-  for (const n of notes) {
+  for (const n of visibleNotes) {
     const x = padX + (n.midi - minMidi) * laneWidth + 1;
     const w = Math.max(3, laneWidth - 2);
     const y = strikeY - (n.time - current) * pxPerSecond;
@@ -2625,7 +2726,12 @@ function drawVisualizerFrame() {
 }
 
 function animateVisualizer() {
-  drawVisualizerFrame();
+  const now = performance.now();
+  const frameMs = 1000 / Math.max(8, Number(state.player.renderCache.visualizerFps || 30));
+  if (!state.player.renderCache.lastRenderMs || now - state.player.renderCache.lastRenderMs >= frameMs) {
+    drawVisualizerFrame();
+    state.player.renderCache.lastRenderMs = now;
+  }
   if (state.player.isPlaying) state.player.raf = requestAnimationFrame(animateVisualizer);
 }
 
@@ -2799,6 +2905,24 @@ function downloadBlob(blob, fileName) {
   URL.revokeObjectURL(url);
 }
 
+function setLastImportReport(report) {
+  state.lastImportReport = report || null;
+  if (!el.downloadImportReportBtn) return;
+  el.downloadImportReportBtn.disabled = !state.lastImportReport;
+}
+
+function downloadLastImportReport() {
+  if (!state.lastImportReport) {
+    toast("Nessun report disponibile", "error");
+    return;
+  }
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const fileName = `pianovisual-import-report-${stamp}.json`;
+  const blob = new Blob([`${JSON.stringify(state.lastImportReport, null, 2)}\n`], { type: "application/json;charset=utf-8" });
+  downloadBlob(blob, fileName);
+  toast("Report import scaricato", "ok");
+}
+
 function updateSelectionInfo() {
   const n = state.selectedSongIds.size;
   const base = el.playlistCount.textContent || "";
@@ -2887,6 +3011,7 @@ async function importArchiveFiles(fileList) {
   showLoading(true);
   try {
     const items = [];
+    const readErrors = [];
     for (const file of files) {
       const lower = file.name.toLowerCase();
       if (lower.endsWith(".zip")) {
@@ -2895,11 +3020,20 @@ async function importArchiveFiles(fileList) {
         for (const entry of entries) {
           if (entry.dir || !entry.name.toLowerCase().endsWith(".json")) continue;
           const content = await entry.async("string");
-          items.push({ fileName: entry.name.split("/").pop(), jsonData: JSON.parse(content) });
+          const flatName = entry.name.split("/").pop();
+          try {
+            items.push({ fileName: flatName, jsonData: JSON.parse(content) });
+          } catch (error) {
+            readErrors.push({ sourceFileName: flatName, status: "error", reason: `JSON parse error: ${error.message}` });
+          }
         }
       } else if (lower.endsWith(".json")) {
         const content = await file.text();
-        items.push({ fileName: file.name, jsonData: JSON.parse(content) });
+        try {
+          items.push({ fileName: file.name, jsonData: JSON.parse(content) });
+        } catch (error) {
+          readErrors.push({ sourceFileName: file.name, status: "error", reason: `JSON parse error: ${error.message}` });
+        }
       }
     }
 
@@ -2908,17 +3042,50 @@ async function importArchiveFiles(fileList) {
       return;
     }
 
+    const dedupMode = el.archiveDedupPolicySelect?.value || "keep_first";
+    const { kept, dropped } = dedupeJsonArchiveItems(items, dedupMode);
+    const toImport = kept;
+    if (toImport.length === 0) {
+      toast("Nessun JSON importabile dopo dedup interno", "error");
+      return;
+    }
+
     const result = await api("/api/library/import-json-archive", {
       method: "POST",
-      body: JSON.stringify({ items }),
+      body: JSON.stringify({
+        items: toImport,
+        conflictPolicy: el.archiveConflictPolicySelect?.value || "skip",
+        dedupPolicy: dedupMode,
+      }),
     });
     await refreshDb();
     render();
-    const skipped = Array.isArray(result.skipped) ? result.skipped.length : 0;
-    const msg = skipped
-      ? `Import archivio: ${result.importedCount} importati, ${skipped} saltati.`
-      : `Import archivio: ${result.importedCount} importati.`;
-    toast(msg, "ok");
+    const reportRows = Array.isArray(result.report) ? result.report : [];
+    const skipped = reportRows.filter((r) => r.status === "skipped").length + dropped.length;
+    const overwritten = Number(result.overwrittenCount || 0);
+    const errored = reportRows.filter((r) => r.status === "error").length + readErrors.length;
+    setLastImportReport({
+      kind: "json-archive",
+      createdAt: new Date().toISOString(),
+      summary: {
+        total: items.length,
+        imported: Number(result.importedCount || 0),
+        overwritten,
+        skipped,
+        errored,
+      },
+      report: [
+        ...reportRows,
+        ...dropped.map((d) => ({
+          sourceFileName: d.item?.fileName || "-",
+          status: "skipped",
+          reason: d.reason,
+        })),
+        ...readErrors,
+      ],
+    });
+    const msg = `Import archivio: ${result.importedCount} importati, ${overwritten} sovrascritti, ${skipped} saltati, ${errored} errori.`;
+    toast(msg, errored > 0 ? "error" : "ok");
   } catch (error) {
     toast(`Import archivio fallito: ${error.message}`, "error");
   }
@@ -3158,6 +3325,7 @@ function bindEvents() {
     setImportStatus("Annullamento import richiesto...", "error");
   });
   el.downloadBtn.addEventListener("click", downloadPreviewJson);
+  el.downloadImportReportBtn.addEventListener("click", downloadLastImportReport);
 
   el.newPlaylistBtn.addEventListener("click", createPlaylist);
   el.managePlaylistBtn.addEventListener("click", managePlaylist);
@@ -3246,6 +3414,7 @@ async function bootstrap() {
     applyTheme("dark", false);
   }
   resetVisualizer();
+  setLastImportReport(null);
   animateMiniVisualizer();
   bindEvents();
   await refreshDb();

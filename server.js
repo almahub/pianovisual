@@ -314,6 +314,83 @@ function inferSongMetadataFromJson(jsonData, fileName) {
   };
 }
 
+function validatePianoVisionJsonData(jsonData) {
+  const errors = [];
+  if (!jsonData || typeof jsonData !== "object" || Array.isArray(jsonData)) {
+    return { ok: false, errors: ["payload non oggetto"] };
+  }
+
+  const hasTracks =
+    (Array.isArray(jsonData.supportingTracks) && jsonData.supportingTracks.length > 0) ||
+    (Array.isArray(jsonData?.original?.tracks) && jsonData.original.tracks.length > 0) ||
+    (jsonData.tracksV2 && typeof jsonData.tracksV2 === "object");
+  if (!hasTracks) errors.push("tracce mancanti (supportingTracks/original.tracks/tracksV2)");
+
+  if (!Array.isArray(jsonData.tempos) || jsonData.tempos.length === 0) {
+    errors.push("tempos mancanti");
+  }
+  if (!Array.isArray(jsonData.timeSignatures) || jsonData.timeSignatures.length === 0) {
+    errors.push("timeSignatures mancanti");
+  }
+
+  const songLength = Number(jsonData.song_length || 0);
+  if (!Number.isFinite(songLength) || songLength < 0) errors.push("song_length non valido");
+
+  return { ok: errors.length === 0, errors };
+}
+
+function findDuplicateSong(db, { hash, title, artist }) {
+  const duplicateByHash = hash ? db.songs.find((s) => s.fileHash === hash) : null;
+  const duplicateByName = db.songs.find(
+    (s) =>
+      normalizeText(artist) &&
+      normalizeText(s.title) === normalizeText(title) &&
+      normalizeText(s.artist) === normalizeText(artist),
+  );
+  return {
+    duplicate: duplicateByHash || duplicateByName || null,
+    reason: duplicateByHash ? "hash-file uguale" : duplicateByName ? "titolo+artista uguali" : "",
+  };
+}
+
+function dedupeIncomingItems(items, mode = "keep_first", keyFn = (item) => [String(item?.sourceFileName || "").toLowerCase()]) {
+  const kept = [];
+  const dropped = [];
+  const keyToIdx = new Map();
+
+  for (const item of items) {
+    const keys = keyFn(item).filter(Boolean);
+    let conflictIdx = -1;
+    for (const k of keys) {
+      if (keyToIdx.has(k)) {
+        conflictIdx = keyToIdx.get(k);
+        break;
+      }
+    }
+
+    if (conflictIdx === -1) {
+      kept.push(item);
+      const idx = kept.length - 1;
+      for (const k of keys) keyToIdx.set(k, idx);
+      continue;
+    }
+
+    if (mode === "keep_last") {
+      const prev = kept[conflictIdx];
+      if (prev) dropped.push({ item: prev, reason: "duplicato interno batch (tenuto ultimo)" });
+      kept[conflictIdx] = item;
+      for (const [k, v] of keyToIdx.entries()) {
+        if (v === conflictIdx) keyToIdx.delete(k);
+      }
+      for (const k of keys) keyToIdx.set(k, conflictIdx);
+    } else {
+      dropped.push({ item, reason: "duplicato interno batch (tenuto primo)" });
+    }
+  }
+
+  return { kept, dropped };
+}
+
 function decodeEscapedUrl(raw) {
   return String(raw || "")
     .replace(/\\u002F/g, "/")
@@ -524,6 +601,8 @@ async function handleApi(req, res, url) {
   if (req.method === "POST" && url.pathname === "/api/library/import-json-archive") {
     const payload = await readBodyJson(req);
     const items = Array.isArray(payload.items) ? payload.items : [];
+    const conflictPolicy = payload.conflictPolicy === "overwrite" || payload.overwrite === true ? "overwrite" : "skip";
+    const dedupPolicy = payload.dedupPolicy === "keep_last" ? "keep_last" : "keep_first";
     if (items.length === 0) {
       sendJson(res, 400, { error: "items vuoto" });
       return true;
@@ -532,65 +611,157 @@ async function handleApi(req, res, url) {
     const db = await readDb();
     const imported = [];
     const skipped = [];
+    const report = [];
+    let overwrittenCount = 0;
 
-    for (const item of items) {
+    const { kept, dropped } = dedupeIncomingItems(items, dedupPolicy, (item) => {
+      const fileName = sanitizeName(item?.fileName || "");
+      const keys = [];
+      if (fileName) keys.push(`file:${normalizeText(fileName)}`);
+      if (item?.jsonData && typeof item.jsonData === "object") {
+        const nm = normalizeText(item.jsonData?.name || "");
+        const ar = normalizeText(item.jsonData?.artist || "");
+        if (nm && ar) keys.push(`ta:${nm}||${ar}`);
+        if (nm) keys.push(`title:${nm}`);
+      }
+      return keys;
+    });
+
+    for (const d of dropped) {
+      const fileName = sanitizeName(d.item?.fileName || `${uid("song")}.json`);
+      const row = { sourceFileName: fileName, status: "skipped", reason: d.reason };
+      skipped.push({ fileName, reason: d.reason });
+      report.push(row);
+    }
+
+    for (const item of kept) {
       const fileName = sanitizeName(item.fileName || `${uid("song")}.json`);
+      const safeFile = fileName.endsWith(".json") ? fileName : `${fileName}.json`;
       const jsonData = item.jsonData;
       if (!jsonData || typeof jsonData !== "object") {
-        skipped.push({ fileName, reason: "json non valido" });
+        const reason = "json non valido";
+        skipped.push({ fileName: safeFile, reason });
+        report.push({ sourceFileName: safeFile, status: "error", reason });
+        continue;
+      }
+
+      const validation = validatePianoVisionJsonData(jsonData);
+      if (!validation.ok) {
+        const reason = `schema non valido: ${validation.errors.join(", ")}`;
+        skipped.push({ fileName: safeFile, reason });
+        report.push({ sourceFileName: safeFile, status: "error", reason });
         continue;
       }
 
       const jsonText = JSON.stringify(jsonData, null, 2);
       const hash = hashBuffer(Buffer.from(jsonText, "utf8"));
-      const meta = inferSongMetadataFromJson(jsonData, fileName);
-
-      const duplicateByHash = db.songs.find((s) => s.fileHash === hash);
-      const duplicateByName = db.songs.find(
-        (s) =>
-          normalizeText(meta.artist) &&
-          normalizeText(s.title) === normalizeText(meta.title) &&
-          normalizeText(s.artist) === normalizeText(meta.artist),
-      );
-      if (duplicateByHash || duplicateByName) {
-        skipped.push({
-          fileName,
-          reason: duplicateByHash ? "hash-file uguale" : "titolo+artista uguali",
-          existingSongId: (duplicateByHash || duplicateByName).id,
-        });
-        continue;
-      }
-
-      const songId = uid("song");
-      const safeFile = fileName.endsWith(".json") ? fileName : `${fileName}.json`;
-      const finalName = `${Date.now()}-${songId}-${safeFile}`;
-      const jsonPathAbs = path.join(JSON_DIR, finalName);
-      await fs.writeFile(jsonPathAbs, `${jsonText}\n`, "utf8");
-
-      const song = {
-        id: songId,
-        ...meta,
-        importedAt: nowIso(),
-        updatedAt: nowIso(),
-        fileHash: hash,
-        sourceFileName: safeFile,
-        jsonPath: `/library/json/${finalName}`,
-        midiPath: "",
-      };
-      db.songs.push(song);
-      db.practiceMeta.push({
-        songId,
-        lastPracticePointSec: 0,
-        playbackSpeed: 1,
-        favoriteLoops: [],
-        studyStatus: "to_study",
+      const meta = inferSongMetadataFromJson(jsonData, safeFile);
+      const { duplicate, reason: duplicateReason } = findDuplicateSong(db, {
+        hash,
+        title: meta.title,
+        artist: meta.artist,
       });
-      applySmartMembership(db, song);
-      imported.push(song);
+
+      try {
+        if (duplicate && conflictPolicy !== "overwrite") {
+          skipped.push({
+            fileName: safeFile,
+            reason: duplicateReason || "duplicato",
+            existingSongId: duplicate.id,
+          });
+          report.push({
+            sourceFileName: safeFile,
+            status: "skipped",
+            reason: duplicateReason || "duplicato",
+            existingSongId: duplicate.id,
+          });
+          continue;
+        }
+
+        if (duplicate && conflictPolicy === "overwrite") {
+          const targetJsonRel = String(duplicate.jsonPath || "").replace(/^\//, "");
+          const targetJsonAbs = targetJsonRel ? path.join(__dirname, targetJsonRel) : path.join(JSON_DIR, safeFile);
+          await writeJsonAtomic(targetJsonAbs, jsonData);
+
+          duplicate.title = repairMojibake(meta.title || duplicate.title || "Senza titolo");
+          duplicate.artist = repairMojibake(meta.artist || duplicate.artist || "");
+          duplicate.composer = repairMojibake(meta.composer || duplicate.composer || "");
+          duplicate.genre = repairMojibake(meta.genre || duplicate.genre || "");
+          duplicate.difficulty = meta.difficulty || duplicate.difficulty || "intermedio";
+          duplicate.key = meta.key || duplicate.key || "C major";
+          duplicate.bpm = Number(meta.bpm || duplicate.bpm || 120);
+          duplicate.duration = Number(meta.duration || duplicate.duration || 0);
+          duplicate.instruments = Array.isArray(meta.instruments) ? meta.instruments : duplicate.instruments || [];
+          duplicate.updatedAt = nowIso();
+          duplicate.fileHash = hash;
+          duplicate.sourceFileName = safeFile;
+          duplicate.jsonPath = `/${path.relative(__dirname, targetJsonAbs).replace(/\\/g, "/")}`;
+          duplicate.midiPath = "";
+          applySmartMembership(db, duplicate);
+
+          imported.push(duplicate);
+          overwrittenCount += 1;
+          report.push({
+            sourceFileName: safeFile,
+            status: "overwritten",
+            songId: duplicate.id,
+            reason: duplicateReason || "duplicato sovrascritto",
+          });
+          continue;
+        }
+
+        const songId = uid("song");
+        const sourceBase = sanitizeName(path.basename(safeFile, ".json")) || `${hash.slice(0, 16)}-${songId}`;
+        let jsonFileName = `${sourceBase}.json`;
+        let seq = 2;
+        while (
+          db.songs.some((s) => String(s.jsonPath || "").endsWith(`/${jsonFileName}`)) ||
+          (await pathExists(path.join(JSON_DIR, jsonFileName)))
+        ) {
+          jsonFileName = `${sourceBase}-${seq}.json`;
+          seq += 1;
+        }
+        const jsonPathAbs = path.join(JSON_DIR, jsonFileName);
+        await writeJsonAtomic(jsonPathAbs, jsonData);
+
+        const song = {
+          id: songId,
+          ...meta,
+          importedAt: nowIso(),
+          updatedAt: nowIso(),
+          fileHash: hash,
+          sourceFileName: safeFile,
+          jsonPath: `/library/json/${jsonFileName}`,
+          midiPath: "",
+        };
+        db.songs.push(song);
+        db.practiceMeta.push({
+          songId,
+          lastPracticePointSec: 0,
+          playbackSpeed: 1,
+          favoriteLoops: [],
+          studyStatus: "to_study",
+        });
+        applySmartMembership(db, song);
+        imported.push(song);
+        report.push({ sourceFileName: safeFile, status: "imported", songId: song.id });
+      } catch (error) {
+        const reason = `errore import: ${error.message}`;
+        skipped.push({ fileName: safeFile, reason });
+        report.push({ sourceFileName: safeFile, status: "error", reason });
+      }
     }
 
     await writeDb(db);
-    sendJson(res, 200, { importedCount: imported.length, skipped, songs: imported });
+    sendJson(res, 200, {
+      importedCount: imported.length,
+      overwrittenCount,
+      skipped,
+      songs: imported,
+      report,
+      conflictPolicy,
+      dedupPolicy,
+    });
     return true;
   }
 
@@ -598,6 +769,7 @@ async function handleApi(req, res, url) {
     const payload = await readBodyJson(req);
     const items = Array.isArray(payload.items) ? payload.items : [];
     const overwriteAll = payload.overwrite === true;
+    const batchDuplicatePolicy = payload.batchDuplicatePolicy === "keep_last" ? "keep_last" : "keep_first";
     if (items.length === 0) {
       sendJson(res, 400, { error: "items vuoto" });
       return true;
@@ -606,6 +778,7 @@ async function handleApi(req, res, url) {
     const db = await readDb();
     const imported = [];
     const skipped = [];
+    const report = [];
     let overwrittenCount = 0;
 
     const applySongTags = (songId, tags, replace = false) => {
@@ -651,30 +824,62 @@ async function handleApi(req, res, url) {
       }
     };
 
-    for (const item of items) {
+    const { kept, dropped } = dedupeIncomingItems(items, batchDuplicatePolicy, (item) => {
+      const source = sanitizeName(item?.sourceFileName || "");
+      const songTitle = normalizeText(item?.song?.title || "");
+      const songArtist = normalizeText(item?.song?.artist || "");
+      const keys = [];
+      if (source) keys.push(`file:${normalizeText(source)}`);
+      if (songTitle && songArtist) keys.push(`ta:${songTitle}||${songArtist}`);
+      if (item?.midiBase64) keys.push(`midi:${hashBuffer(Buffer.from(item.midiBase64, "base64"))}`);
+      return keys;
+    });
+
+    for (const d of dropped) {
+      const sourceFileName = sanitizeName(d.item?.sourceFileName || "song.mid");
+      skipped.push({ sourceFileName, reason: d.reason, existingSongId: "" });
+      report.push({ sourceFileName, status: "skipped", reason: d.reason });
+    }
+
+    for (const item of kept) {
       const midiBase64 = item.midiBase64;
       const songMeta = item.song || {};
       const jsonData = item.jsonData;
       const sourceFileName = sanitizeName(item.sourceFileName || "song.mid");
-      if (!midiBase64 || !jsonData) continue;
+      if (!midiBase64 || !jsonData) {
+        skipped.push({ sourceFileName, reason: "payload incompleto", existingSongId: "" });
+        report.push({ sourceFileName, status: "error", reason: "payload incompleto" });
+        continue;
+      }
+
+      const validation = validatePianoVisionJsonData(jsonData);
+      if (!validation.ok) {
+        const reason = `schema non valido: ${validation.errors.join(", ")}`;
+        skipped.push({ sourceFileName, reason, existingSongId: "" });
+        report.push({ sourceFileName, status: "error", reason });
+        continue;
+      }
 
       const midiBuffer = Buffer.from(midiBase64, "base64");
       const hash = hashBuffer(midiBuffer);
       const hashPrefix = hash.slice(0, 16);
 
-      const duplicateByHash = db.songs.find((s) => s.fileHash === hash);
-      const duplicateByName = db.songs.find(
-        (s) =>
-          normalizeText(songMeta.artist) &&
-          normalizeText(s.title) === normalizeText(songMeta.title) &&
-          normalizeText(s.artist) === normalizeText(songMeta.artist),
-      );
-      const duplicate = duplicateByHash || duplicateByName;
+      const { duplicate, reason: duplicateReason } = findDuplicateSong(db, {
+        hash,
+        title: songMeta.title,
+        artist: songMeta.artist,
+      });
       const itemOverwrite = overwriteAll || item.overwrite === true;
       if (duplicate && !itemOverwrite) {
         skipped.push({
           sourceFileName,
-          reason: duplicateByHash ? "hash-file uguale" : "titolo+artista uguali",
+          reason: duplicateReason || "duplicato",
+          existingSongId: duplicate.id,
+        });
+        report.push({
+          sourceFileName,
+          status: "skipped",
+          reason: duplicateReason || "duplicato",
           existingSongId: duplicate.id,
         });
         continue;
@@ -711,7 +916,7 @@ async function handleApi(req, res, url) {
           targetSong.updatedAt = nowIso();
           targetSong.fileHash = hash;
           targetSong.sourceFileName = sourceFileName;
-          targetSong.jsonPath = `/${path.relative(__dirname, targetJsonAbs).replace(/\\\\/g, "/")}`;
+          targetSong.jsonPath = `/${path.relative(__dirname, targetJsonAbs).replace(/\\/g, "/")}`;
           targetSong.midiPath = "";
 
           let practice = db.practiceMeta.find((pm) => pm.songId === targetSong.id);
@@ -730,6 +935,12 @@ async function handleApi(req, res, url) {
 
           imported.push(targetSong);
           overwrittenCount += 1;
+          report.push({
+            sourceFileName,
+            status: "overwritten",
+            songId: targetSong.id,
+            reason: duplicateReason || "duplicato sovrascritto",
+          });
           continue;
         }
 
@@ -783,9 +994,16 @@ async function handleApi(req, res, url) {
         applySongCollections(songId, songMeta.collectionIds, typeof songMeta.favorite === "boolean" ? songMeta.favorite : undefined);
         applySmartMembership(db, song);
         imported.push(song);
+        report.push({ sourceFileName, status: "imported", songId: song.id });
       } catch (error) {
         skipped.push({
           sourceFileName,
+          reason: `errore import: ${error.message}`,
+          existingSongId: duplicate?.id || "",
+        });
+        report.push({
+          sourceFileName,
+          status: "error",
           reason: `errore import: ${error.message}`,
           existingSongId: duplicate?.id || "",
         });
@@ -793,7 +1011,14 @@ async function handleApi(req, res, url) {
     }
 
     await writeDb(db);
-    sendJson(res, 200, { importedCount: imported.length, overwrittenCount, songs: imported, skipped });
+    sendJson(res, 200, {
+      importedCount: imported.length,
+      overwrittenCount,
+      songs: imported,
+      skipped,
+      report,
+      batchDuplicatePolicy,
+    });
     return true;
   }
 

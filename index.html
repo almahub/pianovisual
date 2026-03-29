@@ -199,6 +199,7 @@
                   <button id="importJsonBtn" class="btn subtle" type="button">Importa JSON brani</button>
                   <button id="cancelImportBtn" class="btn subtle danger hidden" type="button">Annulla import</button>
                   <button id="downloadBtn" class="btn subtle" type="button" disabled>Scarica anteprima JSON</button>
+                  <button id="downloadImportReportBtn" class="btn subtle" type="button" disabled>Scarica report import</button>
                 </div>
                 <input id="importJsonFileInput" type="file" accept=".zip,.json" multiple class="hidden" />
                 <div class="import-grid">
@@ -214,6 +215,20 @@
                   <label>
                     Duplicati nel batch
                     <select id="batchDedupSelect">
+                      <option value="keep_first">Tieni primo</option>
+                      <option value="keep_last">Tieni ultimo</option>
+                    </select>
+                  </label>
+                  <label>
+                    Conflitti import JSON archivio
+                    <select id="archiveConflictPolicySelect">
+                      <option value="skip">Salta duplicati</option>
+                      <option value="overwrite">Sovrascrivi duplicati</option>
+                    </select>
+                  </label>
+                  <label>
+                    Duplicati interni archivio
+                    <select id="archiveDedupPolicySelect">
                       <option value="keep_first">Tieni primo</option>
                       <option value="keep_last">Tieni ultimo</option>
                     </select>
@@ -317,6 +332,7 @@
                 <details open>
                   <summary>Visualizer</summary>
                   <canvas id="visualizerCanvas" width="520" height="220"></canvas>
+                  <div id="visualizerLegend" class="visualizer-legend"></div>
                 </details>
 
                 <details open>
@@ -377,7 +393,7 @@
                   </div>
                 </details>
 
-                <div class="detail-actions">
+                <div class="detail-actions detail-actions-grid">
                   <button id="exportFilteredJsonBtn" class="btn subtle" type="button">Esporta JSON filtrato</button>
                   <button id="toggleFavoriteBtn" class="btn subtle" type="button">Toggle preferito</button>
                   <button id="addToPlaylistBtn" class="btn subtle" type="button">Aggiungi a playlist</button>
