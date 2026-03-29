@@ -40,7 +40,8 @@ Apri `http://localhost:5173`.
 ## Struttura progetto
 - `app.js`: logica frontend (import, UI, visualizer)
 - `server.js`: API locale e persistenza
-- `library/db.json`: database locale
+- `library/db.json`: database runtime locale (non versionato)
+- `library/db.example.json`: template base versionato
 - `library/json/`: JSON convertiti (dati locali, non versionati)
 - `tests/`: test automatici flusso import
 - `samples/json/`: esempi JSON "safe"

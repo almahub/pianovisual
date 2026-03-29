@@ -8,6 +8,7 @@ library/exports/*
 !library/exports/.gitkeep
 
 # local database state
+library/db.json
 library/db.backup-*.json
 library/*.tmp
 

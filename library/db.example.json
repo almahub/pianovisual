@@ -1,0 +1,49 @@
+{
+  "songs": [],
+  "collections": [
+    {
+      "id": "col-favorites",
+      "name": "Preferiti",
+      "type": "preferiti",
+      "sortOrder": 0
+    },
+    {
+      "id": "col-study",
+      "name": "Studio",
+      "type": "studio",
+      "sortOrder": 1
+    },
+    {
+      "id": "col-smart-key-g",
+      "name": "Tonalita di Sol",
+      "type": "playlist",
+      "sortOrder": 100,
+      "smartRule": {
+        "keyIncludes": "G"
+      }
+    },
+    {
+      "id": "col-smart-bpm90",
+      "name": "BPM < 90",
+      "type": "playlist",
+      "sortOrder": 101,
+      "smartRule": {
+        "bpmLt": 90
+      }
+    },
+    {
+      "id": "col-smart-beginner",
+      "name": "Difficolta Principiante",
+      "type": "playlist",
+      "sortOrder": 102,
+      "smartRule": {
+        "difficulty": "principiante"
+      }
+    }
+  ],
+  "songCollection": [],
+  "tags": [],
+  "songTags": [],
+  "practiceMeta": [],
+  "updatedAt": "2026-03-29T09:06:44.729Z"
+}
