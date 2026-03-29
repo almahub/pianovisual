@@ -1,0 +1,21 @@
+{
+  "supportingTracks": [
+    {
+      "notes": [
+        { "midi": 60, "time": 0, "velocity": 0.8, "duration": 0.4 },
+        { "midi": 62, "time": 0.5, "velocity": 0.8, "duration": 0.4 },
+        { "midi": 64, "time": 1.0, "velocity": 0.8, "duration": 0.4 },
+        { "midi": 65, "time": 1.5, "velocity": 0.8, "duration": 0.4 },
+        { "midi": 67, "time": 2.0, "velocity": 0.8, "duration": 0.4 },
+        { "midi": 69, "time": 2.5, "velocity": 0.8, "duration": 0.4 },
+        { "midi": 71, "time": 3.0, "velocity": 0.8, "duration": 0.4 },
+        { "midi": 72, "time": 3.5, "velocity": 0.8, "duration": 0.8 }
+      ]
+    }
+  ],
+  "song_length": 4.3,
+  "resolution": 480,
+  "tempos": [{ "bpm": 120, "ticks": 0, "time": 0 }],
+  "name": "Example C Major Scale",
+  "artist": "Public Domain Example"
+}

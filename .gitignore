@@ -1,0 +1,22 @@
+# dependencies
+node_modules/
+
+# runtime/local library data
+library/json/*
+!library/json/.gitkeep
+library/exports/*
+!library/exports/.gitkeep
+
+# local database state
+library/db.backup-*.json
+library/*.tmp
+
+# logs
+*.log
+npm-debug.log*
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

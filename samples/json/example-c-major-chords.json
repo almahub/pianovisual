@@ -1,0 +1,25 @@
+{
+  "supportingTracks": [
+    {
+      "notes": [
+        { "midi": 48, "time": 0.0, "velocity": 0.75, "duration": 1.0 },
+        { "midi": 52, "time": 0.0, "velocity": 0.75, "duration": 1.0 },
+        { "midi": 55, "time": 0.0, "velocity": 0.75, "duration": 1.0 },
+        { "midi": 53, "time": 1.1, "velocity": 0.75, "duration": 1.0 },
+        { "midi": 57, "time": 1.1, "velocity": 0.75, "duration": 1.0 },
+        { "midi": 60, "time": 1.1, "velocity": 0.75, "duration": 1.0 },
+        { "midi": 55, "time": 2.2, "velocity": 0.75, "duration": 1.0 },
+        { "midi": 59, "time": 2.2, "velocity": 0.75, "duration": 1.0 },
+        { "midi": 62, "time": 2.2, "velocity": 0.75, "duration": 1.0 },
+        { "midi": 48, "time": 3.3, "velocity": 0.75, "duration": 1.2 },
+        { "midi": 52, "time": 3.3, "velocity": 0.75, "duration": 1.2 },
+        { "midi": 55, "time": 3.3, "velocity": 0.75, "duration": 1.2 }
+      ]
+    }
+  ],
+  "song_length": 4.6,
+  "resolution": 480,
+  "tempos": [{ "bpm": 108, "ticks": 0, "time": 0 }],
+  "name": "Example C Major Chords",
+  "artist": "Public Domain Example"
+}
