@@ -97,6 +97,7 @@ Per segnalazioni, vedi [SECURITY.md](SECURITY.md).
 
 ## Contribuire
 Vedi [CONTRIBUTING.md](CONTRIBUTING.md).
+Checklist rilascio: [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md).
 
 ## Changelog
 Vedi [CHANGELOG.md](CHANGELOG.md).
