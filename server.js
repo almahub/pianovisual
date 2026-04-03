@@ -478,6 +478,12 @@ async function handleApi(req, res, url) {
     return true;
   }
 
+  if (req.method === "GET" && url.pathname === "/api/library/path") {
+    await ensureSetup();
+    sendJson(res, 200, { libraryDir: LIBRARY_DIR, jsonDir: JSON_DIR, dbPath: DB_PATH });
+    return true;
+  }
+
   if (req.method === "GET" && url.pathname === "/api/export") {
     const db = await readDb();
     const exportData = {

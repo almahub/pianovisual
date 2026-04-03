@@ -140,6 +140,12 @@ function buildMenu() {
   Menu.setApplicationMenu(menu);
 }
 
+ipcMain.handle("library:open-folder", async () => {
+  const result = await shell.openPath(runtimeLibraryDir());
+  if (result) return { ok: false, error: result };
+  return { ok: true, path: runtimeLibraryDir() };
+});
+
 function setupAutoUpdater() {
   if (!app.isPackaged) return;
   // Lazy require: non necessario in sviluppo.
