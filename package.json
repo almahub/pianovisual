@@ -62,7 +62,8 @@
       {
         "provider": "github",
         "owner": "almahub",
-        "repo": "pianovisual"
+        "repo": "pianovisual",
+        "releaseType": "release"
       }
     ]
   }
