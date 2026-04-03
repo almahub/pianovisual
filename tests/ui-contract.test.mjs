@@ -11,6 +11,7 @@ test("ui critical controls exist for key workflows", async () => {
   const requiredIds = [
     "appVersionBadge",
     "updateStatusBtn",
+    "openLibraryFolderBtn",
     "newPlaylistBtn",
     "saveBatchBtn",
     "downloadSelectedBtn",

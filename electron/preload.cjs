@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("pianovisualDesktop", {
   checkUpdates: () => ipcRenderer.invoke("updater:check"),
+  openLibraryFolder: () => ipcRenderer.invoke("library:open-folder"),
   onUpdateStatus: (handler) => {
     if (typeof handler !== "function") return () => {};
     const listener = (_, payload) => handler(payload);
@@ -15,4 +16,3 @@ contextBridge.exposeInMainWorld("pianovisualDesktop", {
     return () => ipcRenderer.removeListener("backend:crashed", listener);
   },
 });
-

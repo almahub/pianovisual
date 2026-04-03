@@ -47,6 +47,7 @@ const el = {
   managePlaylistBtn: document.getElementById("managePlaylistBtn"),
   backupBtn: document.getElementById("backupBtn"),
   importArchiveBtn: document.getElementById("importArchiveBtn"),
+  openLibraryFolderBtn: document.getElementById("openLibraryFolderBtn"),
   themeLightBtn: document.getElementById("themeLightBtn"),
   themeDarkBtn: document.getElementById("themeDarkBtn"),
   archiveFileInput: document.getElementById("archiveFileInput"),
@@ -3105,6 +3106,29 @@ async function exportBackup() {
   }
 }
 
+async function openLibraryFolder() {
+  try {
+    if (window.pianovisualDesktop?.openLibraryFolder) {
+      const result = await window.pianovisualDesktop.openLibraryFolder();
+      if (!result?.ok) {
+        throw new Error(result?.error || "Impossibile aprire la cartella libreria");
+      }
+      toast("Cartella libreria aperta", "ok");
+      return;
+    }
+
+    const pathInfo = await api("/api/library/path");
+    const lib = pathInfo?.libraryDir || "(non disponibile)";
+    toast(`Percorso libreria: ${lib}`, "ok");
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(String(lib));
+      toast("Percorso copiato negli appunti", "ok");
+    }
+  } catch (error) {
+    toast(`Apri cartella libreria fallito: ${error.message}`, "error");
+  }
+}
+
 async function importArchiveFiles(fileList) {
   const files = [...(fileList || [])];
   if (files.length === 0) return;
@@ -3445,6 +3469,7 @@ function bindEvents() {
   el.newPlaylistBtn.addEventListener("click", createPlaylist);
   el.managePlaylistBtn.addEventListener("click", managePlaylist);
   el.backupBtn.addEventListener("click", exportBackup);
+  el.openLibraryFolderBtn.addEventListener("click", openLibraryFolder);
   el.importArchiveBtn.addEventListener("click", () => el.archiveFileInput.click());
   el.archiveFileInput.addEventListener("change", () => importArchiveFiles(el.archiveFileInput.files));
   el.themeLightBtn.addEventListener("click", () => applyTheme("light"));
