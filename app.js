@@ -29,6 +29,8 @@ const el = {
 
   searchInput: document.getElementById("searchInput"),
   searchWrap: document.getElementById("searchWrap"),
+  appVersionBadge: document.getElementById("appVersionBadge"),
+  updateStatusBtn: document.getElementById("updateStatusBtn"),
   bpmFilter: document.getElementById("bpmFilter"),
   keyFilter: document.getElementById("keyFilter"),
   difficultyFilter: document.getElementById("difficultyFilter"),
@@ -179,6 +181,12 @@ const state = {
   selectedGenre: "",
   selectedArtist: "",
   theme: "dark",
+  appVersion: "",
+  updater: {
+    isDesktop: false,
+    status: "idle",
+    detail: "",
+  },
   player: {
     synth: null,
     part: null,
@@ -284,6 +292,99 @@ async function api(path, options = {}) {
     throw new Error(data?.error || data?.message || `${res.status} ${res.statusText}`);
   }
   return data;
+}
+
+function renderAppVersion() {
+  const version = state.appVersion || "-";
+  el.appVersionBadge.textContent = `v${version}`;
+}
+
+function setUpdaterStatus(status, detail = "") {
+  state.updater.status = status || "idle";
+  state.updater.detail = String(detail || "");
+  const btn = el.updateStatusBtn;
+  if (!btn) return;
+
+  btn.classList.remove("update-ready", "update-error");
+  btn.disabled = false;
+
+  if (!state.updater.isDesktop) {
+    btn.textContent = "Aggiornamenti (desktop)";
+    btn.title = "Disponibile solo nella versione desktop installata";
+    return;
+  }
+
+  if (status === "checking") {
+    btn.textContent = "Controllo update...";
+    btn.title = "Verifica aggiornamenti in corso";
+    btn.disabled = true;
+    return;
+  }
+  if (status === "available") {
+    btn.textContent = `Update disponibile ${detail ? `(${detail})` : ""}`;
+    btn.classList.add("update-ready");
+    btn.title = "Nuova versione disponibile: download automatico avviato";
+    return;
+  }
+  if (status === "downloading") {
+    btn.textContent = `Download update ${detail || ""}`.trim();
+    btn.classList.add("update-ready");
+    btn.title = "Download aggiornamento in corso";
+    return;
+  }
+  if (status === "downloaded") {
+    btn.textContent = "Update pronto (riavvia)";
+    btn.classList.add("update-ready");
+    btn.title = "Aggiornamento pronto: conferma installazione dal popup";
+    return;
+  }
+  if (status === "error") {
+    btn.textContent = "Errore update";
+    btn.classList.add("update-error");
+    btn.title = detail || "Errore durante la verifica aggiornamenti";
+    return;
+  }
+  if (status === "not-available") {
+    btn.textContent = "Aggiornato";
+    btn.title = "Sei già all'ultima versione";
+    return;
+  }
+
+  btn.textContent = "Verifica aggiornamenti";
+  btn.title = "Controlla se esiste una nuova versione";
+}
+
+async function loadAppVersionAndUpdater() {
+  try {
+    const meta = await api("/api/version");
+    state.appVersion = String(meta?.version || "").trim() || "dev";
+  } catch {
+    state.appVersion = "dev";
+  }
+  renderAppVersion();
+
+  const desktopApi = window.pianovisualDesktop;
+  state.updater.isDesktop = Boolean(desktopApi && typeof desktopApi.checkUpdates === "function");
+  setUpdaterStatus("idle");
+
+  if (!state.updater.isDesktop) return;
+
+  if (typeof desktopApi.onUpdateStatus === "function") {
+    desktopApi.onUpdateStatus((payload) => {
+      const status = String(payload?.status || "idle");
+      const detail = String(payload?.detail || "");
+      setUpdaterStatus(status, detail);
+      if (status === "available") toast(`Nuova versione disponibile ${detail ? `(${detail})` : ""}`, "ok");
+      if (status === "downloaded") toast("Aggiornamento pronto: conferma riavvio dal popup", "ok");
+      if (status === "error") toast(`Errore aggiornamento: ${detail || "sconosciuto"}`, "error");
+    });
+  }
+
+  if (typeof desktopApi.onBackendCrash === "function") {
+    desktopApi.onBackendCrash((payload) => {
+      toast(payload?.message || "Backend terminato inaspettatamente", "error");
+    });
+  }
 }
 
 function parseTagsInput(value) {
@@ -3215,6 +3316,20 @@ function bindEvents() {
   });
 
   el.clearFiltersBtn.addEventListener("click", resetFilters);
+  el.updateStatusBtn.addEventListener("click", async () => {
+    if (!state.updater.isDesktop || !window.pianovisualDesktop?.checkUpdates) {
+      toast("Verifica aggiornamenti disponibile nella versione desktop installata", "error");
+      return;
+    }
+    try {
+      setUpdaterStatus("checking");
+      await window.pianovisualDesktop.checkUpdates();
+    } catch (error) {
+      setUpdaterStatus("error", error.message || "check update fallito");
+      toast(`Errore verifica aggiornamenti: ${error.message}`, "error");
+    }
+  });
+
   el.detailInstrumentsBadges.addEventListener("click", (event) => {
     const btn = event.target.closest("[data-instrument-toggle]");
     if (!btn) return;
@@ -3415,6 +3530,7 @@ async function bootstrap() {
   }
   resetVisualizer();
   setLastImportReport(null);
+  await loadAppVersionAndUpdater();
   animateMiniVisualizer();
   bindEvents();
   await refreshDb();

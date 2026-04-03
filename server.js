@@ -15,6 +15,9 @@ const LIBRARY_DIR = process.env.PIANOVISUAL_LIBRARY_DIR
 const JSON_DIR = path.join(LIBRARY_DIR, "json");
 const EXPORTS_DIR = path.join(LIBRARY_DIR, "exports");
 const DB_PATH = path.join(LIBRARY_DIR, "db.json");
+const PACKAGE_JSON_PATH = path.join(__dirname, "package.json");
+
+let cachedAppVersion = "";
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -107,6 +110,22 @@ function sendJson(res, status, data) {
 function sendText(res, status, text) {
   res.writeHead(status, { "Content-Type": "text/plain; charset=utf-8" });
   res.end(text);
+}
+
+async function getAppVersion() {
+  if (cachedAppVersion) return cachedAppVersion;
+  if (process.env.PIANOVISUAL_APP_VERSION) {
+    cachedAppVersion = String(process.env.PIANOVISUAL_APP_VERSION);
+    return cachedAppVersion;
+  }
+  try {
+    const raw = await fs.readFile(PACKAGE_JSON_PATH, "utf8");
+    const pkg = JSON.parse(raw);
+    cachedAppVersion = String(pkg?.version || "dev");
+  } catch {
+    cachedAppVersion = "dev";
+  }
+  return cachedAppVersion;
 }
 
 async function readBodyJson(req) {
@@ -447,6 +466,12 @@ function extractHtmlMeta(html, baseUrl) {
 }
 
 async function handleApi(req, res, url) {
+  if (req.method === "GET" && url.pathname === "/api/version") {
+    const version = await getAppVersion();
+    sendJson(res, 200, { version });
+    return true;
+  }
+
   if (req.method === "GET" && url.pathname === "/api/library") {
     const db = await readDb();
     sendJson(res, 200, db);

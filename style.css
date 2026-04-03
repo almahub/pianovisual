@@ -185,7 +185,7 @@ body {
 
 .topbar {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto 1fr auto;
   gap: 10px;
   align-items: center;
   padding: 12px 16px;
@@ -246,6 +246,34 @@ body {
   width: 64px;
   height: 18px;
   opacity: 0.72;
+}
+
+.topbar-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-self: end;
+}
+
+.version-badge {
+  border: 1px solid #343434;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.76rem;
+  color: #d5d5d5;
+  background: #191919;
+}
+
+#updateStatusBtn.update-ready {
+  border-color: #2f7d4c;
+  background: #133321;
+  color: #b7f3ca;
+}
+
+#updateStatusBtn.update-error {
+  border-color: #7a3030;
+  background: #351515;
+  color: #ffc0c0;
 }
 
 .history-buttons {
@@ -955,6 +983,12 @@ tbody tr.active {
   background: linear-gradient(to bottom, rgba(233, 238, 247, 0.95), rgba(248, 250, 254, 0.92));
 }
 
+:root[data-theme="light"] .version-badge {
+  background: #f2f6fc;
+  border-color: #cfd8e6;
+  color: #334155;
+}
+
 :root[data-theme="light"] .round-btn,
 :root[data-theme="light"] .profile-pill {
   background: #e5eaf2;
@@ -1126,6 +1160,10 @@ tbody tr.active {
 
   .topbar-player {
     flex-wrap: wrap;
+  }
+
+  .topbar-meta {
+    justify-self: start;
   }
 
   .topbar-track-meta,

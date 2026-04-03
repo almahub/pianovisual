@@ -52,6 +52,7 @@ async function startBackend() {
   process.env.HOST = HOST;
   process.env.PORT = String(DEFAULT_PORT);
   process.env.PIANOVISUAL_LIBRARY_DIR = runtimeLibraryDir();
+  process.env.PIANOVISUAL_APP_VERSION = app.getVersion();
 
   const serverUrl = pathToFileURL(serverEntryPath()).href;
   serverModule = await import(`${serverUrl}?ts=${Date.now()}`);

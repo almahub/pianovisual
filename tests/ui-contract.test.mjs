@@ -9,6 +9,8 @@ const indexPath = path.join(root, "index.html");
 test("ui critical controls exist for key workflows", async () => {
   const html = await fs.readFile(indexPath, "utf8");
   const requiredIds = [
+    "appVersionBadge",
+    "updateStatusBtn",
     "newPlaylistBtn",
     "saveBatchBtn",
     "downloadSelectedBtn",
@@ -22,4 +24,3 @@ test("ui critical controls exist for key workflows", async () => {
     assert.equal(html.includes(`id=\"${id}\"`), true, `missing #${id}`);
   }
 });
-
