@@ -1348,3 +1348,5 @@ if (process.env.CODESPACES === "true" && process.env.CODESPACE_NAME && process.e
   const publicUrl = `https://${process.env.CODESPACE_NAME}-${boundPort}.${process.env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}`;
   console.log(`Apri da browser (Codespaces): ${publicUrl}`);
 }
+
+export { server, boundPort };

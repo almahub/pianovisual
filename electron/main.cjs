@@ -1,16 +1,14 @@
 const { app, BrowserWindow, Menu, dialog, shell, ipcMain } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs/promises");
-const net = require("node:net");
-const http = require("node:http");
-const { spawn } = require("node:child_process");
+const { pathToFileURL } = require("node:url");
 
 const isDev = !app.isPackaged;
 const DEFAULT_PORT = 5173;
 const HOST = "127.0.0.1";
 
 let mainWindow = null;
-let serverProc = null;
+let serverModule = null;
 let serverPort = DEFAULT_PORT;
 let quitting = false;
 let autoUpdaterRef = null;
@@ -49,92 +47,27 @@ async function ensureRuntimeLibrary() {
   }
 }
 
-function canListen(port) {
-  return new Promise((resolve) => {
-    const tester = net.createServer();
-    tester.once("error", () => resolve(false));
-    tester.once("listening", () => {
-      tester.close(() => resolve(true));
-    });
-    tester.listen(port, HOST);
-  });
-}
-
-async function findFreePort(base = DEFAULT_PORT, maxOffset = 40) {
-  for (let port = base; port <= base + maxOffset; port += 1) {
-    if (await canListen(port)) return port;
-  }
-  throw new Error(`Nessuna porta libera trovata nel range ${base}-${base + maxOffset}`);
-}
-
-function waitForServer(url, timeoutMs = 20000) {
-  const startedAt = Date.now();
-  return new Promise((resolve, reject) => {
-    const attempt = () => {
-      if (Date.now() - startedAt > timeoutMs) {
-        reject(new Error("Timeout avvio backend"));
-        return;
-      }
-
-      const req = http.get(url, (res) => {
-        res.resume();
-        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 500) {
-          resolve();
-          return;
-        }
-        setTimeout(attempt, 250);
-      });
-      req.on("error", () => setTimeout(attempt, 250));
-      req.setTimeout(2000, () => {
-        req.destroy();
-        setTimeout(attempt, 250);
-      });
-    };
-    attempt();
-  });
-}
-
 async function startBackend() {
   await ensureRuntimeLibrary();
-  serverPort = await findFreePort();
+  process.env.HOST = HOST;
+  process.env.PORT = String(DEFAULT_PORT);
+  process.env.PIANOVISUAL_LIBRARY_DIR = runtimeLibraryDir();
 
-  const env = {
-    ...process.env,
-    ELECTRON_RUN_AS_NODE: "1",
-    HOST,
-    PORT: String(serverPort),
-    PIANOVISUAL_LIBRARY_DIR: runtimeLibraryDir(),
-  };
-
-  serverProc = spawn(process.execPath, [serverEntryPath()], {
-    cwd: projectRoot(),
-    env,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-
-  serverProc.stdout.on("data", (buf) => process.stdout.write(`[backend] ${buf}`));
-  serverProc.stderr.on("data", (buf) => process.stderr.write(`[backend] ${buf}`));
-
-  serverProc.once("exit", (code, signal) => {
-    if (quitting) return;
-    const msg = `Backend terminato inaspettatamente (code=${code ?? "null"}, signal=${signal ?? "null"})`;
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      dialog.showErrorBox("PianoVisual backend", msg);
-      mainWindow.webContents.send("backend:crashed", { message: msg });
-    } else {
-      dialog.showErrorBox("PianoVisual backend", msg);
-    }
-  });
-
-  await waitForServer(`http://${HOST}:${serverPort}/api/library`);
+  const serverUrl = pathToFileURL(serverEntryPath()).href;
+  serverModule = await import(`${serverUrl}?ts=${Date.now()}`);
+  serverPort = Number(serverModule?.boundPort || DEFAULT_PORT);
 }
 
-function stopBackend() {
-  if (!serverProc || serverProc.killed) return;
+async function stopBackend() {
+  if (!serverModule?.server) return;
   try {
-    serverProc.kill("SIGTERM");
+    await new Promise((resolve) => {
+      serverModule.server.close(() => resolve());
+    });
   } catch {
     // ignore
+  } finally {
+    serverModule = null;
   }
 }
 
@@ -290,10 +223,9 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   quitting = true;
-  stopBackend();
+  stopBackend().catch(() => {});
 });
 
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
 });
-
