@@ -1,5 +1,10 @@
 # dependencies
 node_modules/
+dist/
+release/
+*.blockmap
+*.exe
+*.AppImage
 
 # runtime/local library data
 library/json/*

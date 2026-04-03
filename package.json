@@ -1,10 +1,69 @@
 {
   "name": "pianovisual",
   "version": "1.0.1",
-  "private": true,
+  "private": false,
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
+    "dev:web": "node server.js",
     "start": "node server.js",
+    "desktop": "electron .",
+    "desktop:dev": "electron .",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win nsis",
     "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2"
+  },
+  "devDependencies": {
+    "electron": "^35.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.almahub.pianovisual",
+    "productName": "PianoVisual",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "app.js",
+      "index.html",
+      "style.css",
+      "server.js",
+      "docs/**/*",
+      "samples/**/*",
+      "library/db.example.json",
+      "library/json/.gitkeep",
+      "library/exports/.gitkeep",
+      "electron/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "almahub",
+        "repo": "pianovisual"
+      }
+    ]
   }
 }

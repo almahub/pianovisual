@@ -9,7 +9,9 @@ const __dirname = path.dirname(__filename);
 const PORT = Number(process.env.PORT || 5173);
 const HOST = process.env.HOST || "0.0.0.0";
 
-const LIBRARY_DIR = path.join(__dirname, "library");
+const LIBRARY_DIR = process.env.PIANOVISUAL_LIBRARY_DIR
+  ? path.resolve(process.env.PIANOVISUAL_LIBRARY_DIR)
+  : path.join(__dirname, "library");
 const JSON_DIR = path.join(LIBRARY_DIR, "json");
 const EXPORTS_DIR = path.join(LIBRARY_DIR, "exports");
 const DB_PATH = path.join(LIBRARY_DIR, "db.json");
@@ -70,6 +72,7 @@ function createDefaultDb() {
 }
 
 async function ensureSetup() {
+  await fs.mkdir(LIBRARY_DIR, { recursive: true });
   await fs.mkdir(JSON_DIR, { recursive: true });
   await fs.mkdir(EXPORTS_DIR, { recursive: true });
   try {
@@ -1256,8 +1259,12 @@ async function serveStatic(req, res, url) {
   let pathname = decodeURIComponent(url.pathname);
   if (pathname === "/") pathname = "/index.html";
 
-  const filePath = path.join(__dirname, pathname);
-  if (!filePath.startsWith(__dirname)) {
+  const normalized = pathname.replace(/^\/+/, "");
+  const isLibraryAsset = normalized.startsWith("library/");
+  const staticRoot = isLibraryAsset ? LIBRARY_DIR : __dirname;
+  const relativePath = isLibraryAsset ? normalized.slice("library/".length) : normalized;
+  const filePath = path.join(staticRoot, relativePath);
+  if (!filePath.startsWith(staticRoot)) {
     sendText(res, 403, "Forbidden");
     return;
   }

@@ -23,12 +23,39 @@ Tool desktop/web locale per convertire **piu file MIDI in JSON compatibile Piano
 - Node.js 20+
 - Browser moderno
 
-## Avvio
+## Avvio web (classico)
 ```bash
 npm install
 npm start
 ```
 Apri `http://localhost:5173`.
+
+## Avvio senza VS Code (quick win)
+- Windows launcher: `scripts\start-pianovisual.bat`
+- Opzionale shortcut desktop:
+  1. apri PowerShell nella repo
+  2. esegui: `powershell -ExecutionPolicy Bypass -File .\scripts\create-desktop-shortcut.ps1`
+  3. usa l'icona `PianoVisual` sul desktop
+
+## App desktop installabile (Electron)
+### Avvio desktop locale
+```bash
+npm install
+npm run desktop
+```
+
+### Build installer Windows (.exe)
+```bash
+npm run dist:win
+```
+Output in `dist/` (installer NSIS).
+
+### Upgrade automatici nel tempo
+- Il progetto usa `electron-updater` + GitHub Releases.
+- Workflow `Desktop Release` builda e pubblica asset Windows su push tag `v*`.
+- Nell'app installata: menu `Aggiornamenti -> Verifica aggiornamenti`.
+- Per update senza token utente, la repository/release deve essere pubblica.
+- Guida test end-to-end: [docs/UPDATE_TEST_v1.0.1_to_v1.0.2.md](docs/UPDATE_TEST_v1.0.1_to_v1.0.2.md)
 
 ## Flusso operativo completo (Quest 3)
 1. Importa uno o piu MIDI nella sezione `Importa MIDI`.
@@ -56,6 +83,8 @@ Vedi [docs/JSON_FORMAT.md](docs/JSON_FORMAT.md).
 
 ## Script
 - `npm start`: avvio server locale
+- `npm run desktop`: avvio app desktop Electron
+- `npm run dist:win`: build installer Windows
 - `npm test`: test automatici
 
 ## Limitazioni note

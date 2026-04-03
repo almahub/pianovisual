@@ -8,6 +8,9 @@ All notable changes to this project will be documented in this file.
 - Opzioni import archivio JSON/ZIP: policy conflitti (`skip`/`overwrite`) e dedup interno (`keep_first`/`keep_last`).
 - Legenda colori strumenti nel visualizer con stato attivo/inattivo.
 - Test aggiuntivi per import archivio (skip/overwrite) e test UI minimo sui controlli critici.
+- Launcher Windows (`scripts/start-pianovisual.bat`) e script shortcut desktop.
+- Packaging desktop con Electron + installer NSIS (`npm run dist:win`).
+- Base aggiornamenti automatici via `electron-updater` + workflow release desktop su tag.
 
 ### Changed
 - Import MIDI batch ora inviato al server in unica richiesta con gestione server-side più robusta del dedup interno.
