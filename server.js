@@ -799,6 +799,153 @@ async function handleApi(req, res, url) {
     return true;
   }
 
+  if (req.method === "POST" && url.pathname === "/api/library/sync-from-json") {
+    const payload = await readBodyJson(req);
+    const updateExisting = payload.updateExisting === true;
+    const db = await readDb();
+
+    let fileNames = [];
+    try {
+      fileNames = await fs.readdir(JSON_DIR);
+    } catch {
+      sendJson(res, 500, { error: "Impossibile leggere la cartella JSON." });
+      return true;
+    }
+
+    const report = [];
+    let addedCount = 0;
+    let updatedCount = 0;
+    let skippedCount = 0;
+    let errorCount = 0;
+
+    for (const fileName of fileNames) {
+      if (!fileName.toLowerCase().endsWith(".json")) continue;
+      if (fileName === ".gitkeep") continue;
+
+      const absPath = path.join(JSON_DIR, fileName);
+      let jsonText = "";
+      let jsonData = null;
+      try {
+        jsonText = await fs.readFile(absPath, "utf8");
+        jsonData = JSON.parse(jsonText);
+      } catch (error) {
+        errorCount += 1;
+        report.push({ sourceFileName: fileName, status: "error", reason: `json non leggibile: ${error.message}` });
+        continue;
+      }
+
+      const validation = validatePianoVisionJsonData(jsonData);
+      if (!validation.ok) {
+        errorCount += 1;
+        report.push({
+          sourceFileName: fileName,
+          status: "error",
+          reason: `schema non valido: ${validation.errors.join(", ")}`,
+        });
+        continue;
+      }
+
+      const hash = hashBuffer(Buffer.from(jsonText, "utf8"));
+      const meta = inferSongMetadataFromJson(jsonData, fileName);
+      const relPath = `/library/json/${fileName}`;
+
+      const existing =
+        db.songs.find((song) => song.fileHash === hash) ||
+        db.songs.find((song) => song.jsonPath === relPath) ||
+        db.songs.find((song) => song.sourceFileName === fileName);
+
+      if (existing) {
+        const before = JSON.stringify(existing);
+        existing.fileHash = hash;
+        existing.sourceFileName = existing.sourceFileName || fileName;
+        existing.jsonPath = existing.jsonPath || relPath;
+
+        if (updateExisting) {
+          existing.title = repairMojibake(meta.title || existing.title || "Senza titolo");
+          existing.artist = repairMojibake(meta.artist || existing.artist || "");
+          existing.composer = repairMojibake(meta.composer || existing.composer || "");
+          existing.genre = repairMojibake(meta.genre || existing.genre || "");
+          existing.difficulty = meta.difficulty || existing.difficulty || "intermedio";
+          existing.key = meta.key || existing.key || "C major";
+          existing.bpm = Number(meta.bpm || existing.bpm || 120);
+          existing.duration = Number(meta.duration || existing.duration || 0);
+          existing.instruments = Array.isArray(meta.instruments) ? meta.instruments : existing.instruments || [];
+        } else {
+          if (!existing.title) existing.title = repairMojibake(meta.title || "Senza titolo");
+          if (!existing.artist) existing.artist = repairMojibake(meta.artist || "");
+          if (!existing.composer) existing.composer = repairMojibake(meta.composer || "");
+          if (!existing.genre) existing.genre = repairMojibake(meta.genre || "");
+          if (!existing.difficulty) existing.difficulty = meta.difficulty || "intermedio";
+          if (!existing.key) existing.key = meta.key || "C major";
+          if (!existing.bpm) existing.bpm = Number(meta.bpm || 120);
+          if (!existing.duration) existing.duration = Number(meta.duration || 0);
+          if (!Array.isArray(existing.instruments) || existing.instruments.length === 0) {
+            existing.instruments = Array.isArray(meta.instruments) ? meta.instruments : [];
+          }
+        }
+
+        existing.updatedAt = nowIso();
+        applySmartMembership(db, existing);
+
+        const after = JSON.stringify(existing);
+        if (before !== after) {
+          updatedCount += 1;
+          report.push({ sourceFileName: fileName, status: "updated", songId: existing.id });
+        } else {
+          skippedCount += 1;
+          report.push({ sourceFileName: fileName, status: "skipped", reason: "nessun cambiamento" });
+        }
+        continue;
+      }
+
+      const songId = uid("song");
+      const song = {
+        id: songId,
+        ...meta,
+        importedAt: nowIso(),
+        updatedAt: nowIso(),
+        fileHash: hash,
+        sourceFileName: fileName,
+        jsonPath: relPath,
+        midiPath: "",
+      };
+      db.songs.push(song);
+      db.practiceMeta.push({
+        songId,
+        lastPracticePointSec: 0,
+        playbackSpeed: 1,
+        favoriteLoops: [],
+        studyStatus: "to_study",
+      });
+      applySmartMembership(db, song);
+      addedCount += 1;
+      report.push({ sourceFileName: fileName, status: "added", songId });
+    }
+
+    const missingOnDisk = [];
+    for (const song of db.songs) {
+      const rel = String(song.jsonPath || "").replace(/^\//, "");
+      if (!rel) continue;
+      const abs = path.join(__dirname, rel);
+      if (!(await pathExists(abs))) {
+        missingOnDisk.push({ songId: song.id, jsonPath: song.jsonPath || "" });
+      }
+    }
+
+    await writeDb(db);
+    sendJson(res, 200, {
+      ok: true,
+      totalFiles: fileNames.length,
+      addedCount,
+      updatedCount,
+      skippedCount,
+      errorCount,
+      missingOnDisk,
+      report,
+    });
+    return true;
+  }
+
   if (req.method === "POST" && url.pathname === "/api/library/import-batch") {
     const payload = await readBodyJson(req);
     const items = Array.isArray(payload.items) ? payload.items : [];

@@ -48,6 +48,7 @@ const el = {
   backupBtn: document.getElementById("backupBtn"),
   importArchiveBtn: document.getElementById("importArchiveBtn"),
   openLibraryFolderBtn: document.getElementById("openLibraryFolderBtn"),
+  syncLibraryBtn: document.getElementById("syncLibraryBtn"),
   themeLightBtn: document.getElementById("themeLightBtn"),
   themeDarkBtn: document.getElementById("themeDarkBtn"),
   archiveFileInput: document.getElementById("archiveFileInput"),
@@ -3129,6 +3130,48 @@ async function openLibraryFolder() {
   }
 }
 
+async function syncLibraryFromDisk() {
+  showLoading(true);
+  try {
+    const result = await api("/api/library/sync-from-json", {
+      method: "POST",
+      body: JSON.stringify({ mode: "add_only" }),
+    });
+    await refreshDb();
+    render();
+
+    const added = Number(result.addedCount || 0);
+    const updated = Number(result.updatedCount || 0);
+    const skipped = Number(result.skippedCount || 0);
+    const errors = Number(result.errorCount || 0);
+    const missing = Array.isArray(result.missingOnDisk) ? result.missingOnDisk.length : 0;
+
+    setLastImportReport({
+      kind: "library-sync",
+      createdAt: new Date().toISOString(),
+      summary: {
+        total: Number(result.totalFiles || 0),
+        added,
+        updated,
+        skipped,
+        errored: errors,
+        missingOnDisk: missing,
+      },
+      report: Array.isArray(result.report) ? result.report : [],
+    });
+
+    const msg = `Riallineamento: ${added} aggiunti, ${updated} aggiornati, ${skipped} già presenti, ${errors} errori.`;
+    toast(msg, errors > 0 ? "error" : "ok");
+    if (missing > 0) {
+      toast(`Attenzione: ${missing} voci db senza file su disco`, "error");
+    }
+  } catch (error) {
+    toast(`Riallineamento fallito: ${error.message}`, "error");
+  } finally {
+    showLoading(false);
+  }
+}
+
 async function importArchiveFiles(fileList) {
   const files = [...(fileList || [])];
   if (files.length === 0) return;
@@ -3470,6 +3513,7 @@ function bindEvents() {
   el.managePlaylistBtn.addEventListener("click", managePlaylist);
   el.backupBtn.addEventListener("click", exportBackup);
   el.openLibraryFolderBtn.addEventListener("click", openLibraryFolder);
+  el.syncLibraryBtn.addEventListener("click", syncLibraryFromDisk);
   el.importArchiveBtn.addEventListener("click", () => el.archiveFileInput.click());
   el.archiveFileInput.addEventListener("change", () => importArchiveFiles(el.archiveFileInput.files));
   el.themeLightBtn.addEventListener("click", () => applyTheme("light"));

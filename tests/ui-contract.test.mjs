@@ -12,6 +12,7 @@ test("ui critical controls exist for key workflows", async () => {
     "appVersionBadge",
     "updateStatusBtn",
     "openLibraryFolderBtn",
+    "syncLibraryBtn",
     "newPlaylistBtn",
     "saveBatchBtn",
     "downloadSelectedBtn",
