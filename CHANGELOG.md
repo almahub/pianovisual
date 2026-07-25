@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.8] - 2026-07-25
+### Added
+- Eliminazione multipla dei brani selezionati dalla libreria, con conferma unica e conteggio degli elementi.
+
+### Changed
+- Gli eventuali brani non eliminati durante un’operazione multipla restano selezionati per consentire un nuovo tentativo.
+
 ## [1.0.1] - 2026-03-29
 ### Added
 - Report import dettagliato per file (importato/sovrascritto/scartato/errore) con download JSON dal pannello Import.

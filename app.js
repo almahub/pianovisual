@@ -158,6 +158,7 @@ const el = {
   selectVisibleBtn: document.getElementById("selectVisibleBtn"),
   clearSelectionBtn: document.getElementById("clearSelectionBtn"),
   downloadSelectedBtn: document.getElementById("downloadSelectedBtn"),
+  deleteSelectedBtn: document.getElementById("deleteSelectedBtn"),
   selectAllPageCheckbox: document.getElementById("selectAllPageCheckbox"),
 
   sortableTh: document.querySelectorAll("th[data-sort-key]"),
@@ -3031,6 +3032,10 @@ function updateSelectionInfo() {
   const base = el.playlistCount.textContent || "";
   const cleanBase = base.replace(/\s+\|\s+Selezionati:\s+\d+$/, "");
   el.playlistCount.textContent = `${cleanBase} | Selezionati: ${n}`;
+  if (el.deleteSelectedBtn) {
+    el.deleteSelectedBtn.disabled = n === 0;
+    el.deleteSelectedBtn.textContent = n > 0 ? `Elimina selezionati (${n})` : "Elimina selezionati";
+  }
 }
 
 function selectVisibleSongs() {
@@ -3078,6 +3083,46 @@ async function downloadSelectedSongsJson() {
     toast(`Scaricati ${ok} brani selezionati`, "ok");
   } catch (error) {
     toast(error.message, "error");
+  } finally {
+    showLoading(false);
+  }
+}
+
+async function deleteSelectedSongs() {
+  const selectedSongs = (state.db?.songs || []).filter((song) => state.selectedSongIds.has(song.id));
+  if (selectedSongs.length === 0) {
+    toast("Nessun brano selezionato", "error");
+    return;
+  }
+  const count = selectedSongs.length;
+  const label = count === 1 ? "il brano selezionato" : `i ${count} brani selezionati`;
+  if (!confirm(`Eliminare definitivamente ${label}? Questa operazione rimuove anche i relativi file JSON.`)) return;
+
+  showLoading(true);
+  const failedIds = new Set();
+  try {
+    for (const song of selectedSongs) {
+      try {
+        await api(`/api/songs/${song.id}`, { method: "DELETE" });
+      } catch {
+        failedIds.add(song.id);
+      }
+    }
+
+    state.selectedSongIds = failedIds;
+    if (selectedSongs.some((song) => song.id === state.selectedSongId && !failedIds.has(song.id))) {
+      state.selectedSongId = "";
+      pausePlayer();
+    }
+    await refreshDb();
+    render();
+
+    const deletedCount = count - failedIds.size;
+    if (failedIds.size === 0) {
+      toast(`${deletedCount} ${deletedCount === 1 ? "brano eliminato" : "brani eliminati"}`, "ok");
+    } else {
+      toast(`${deletedCount} eliminati, ${failedIds.size} non eliminati e ancora selezionati`, "error");
+    }
   } finally {
     showLoading(false);
   }
@@ -3438,6 +3483,7 @@ function bindEvents() {
   el.selectVisibleBtn.addEventListener("click", selectVisibleSongs);
   el.clearSelectionBtn.addEventListener("click", clearSelectedSongs);
   el.downloadSelectedBtn.addEventListener("click", downloadSelectedSongsJson);
+  el.deleteSelectedBtn.addEventListener("click", deleteSelectedSongs);
   el.selectAllPageCheckbox.addEventListener("change", () => {
     const rows = currentPageRows();
     if (el.selectAllPageCheckbox.checked) {

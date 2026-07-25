@@ -16,6 +16,7 @@ test("ui critical controls exist for key workflows", async () => {
     "newPlaylistBtn",
     "saveBatchBtn",
     "downloadSelectedBtn",
+    "deleteSelectedBtn",
     "detailInstrumentsBadges",
     "downloadImportReportBtn",
     "archiveConflictPolicySelect",
