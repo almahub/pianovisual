@@ -16,6 +16,7 @@ const JSON_DIR = path.join(LIBRARY_DIR, "json");
 const EXPORTS_DIR = path.join(LIBRARY_DIR, "exports");
 const DB_PATH = path.join(LIBRARY_DIR, "db.json");
 const PACKAGE_JSON_PATH = path.join(__dirname, "package.json");
+const REMOTE_CATALOG_ORIGIN = "https://ftp.karapertutti.altervista.org";
 
 let cachedAppVersion = "";
 
@@ -420,6 +421,100 @@ function decodeEscapedUrl(raw) {
     .replace(/&amp;/g, "&");
 }
 
+function decodeHtmlText(value) {
+  return String(value || "")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(parseInt(code, 16)))
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;|&apos;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .trim();
+}
+
+function validRemoteMidiPath(value) {
+  const clean = decodeHtmlText(value).replace(/\\'/g, "'").trim();
+  if (!clean || clean.includes("\0") || clean.startsWith("/") || clean.split("/").includes("..")) return "";
+  return /\.(mid|midi|kar)$/i.test(clean) ? clean : "";
+}
+
+async function fetchRemoteCatalogPage(pathname, params = {}) {
+  const target = new URL(pathname, REMOTE_CATALOG_ORIGIN);
+  for (const [key, value] of Object.entries(params)) target.searchParams.set(key, value);
+  const response = await fetch(target, {
+    headers: {
+      "User-Agent": "PianoVisual/1.0 (+local desktop catalog browser)",
+      Accept: "text/html,application/xhtml+xml",
+    },
+  });
+  if (!response.ok) throw new Error(`Catalogo remoto non disponibile (HTTP ${response.status})`);
+  return response.text();
+}
+
+function parseRemoteArtists(html) {
+  const artists = [];
+  const rows = String(html || "").match(/<tr>[\s\S]*?<\/tr>/gi) || [];
+  for (const row of rows) {
+    if (!row.includes("📁")) continue;
+    const href = row.match(/href=["']\?path=([^"']+)["']/i)?.[1];
+    const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)];
+    const name = decodeHtmlText(cells[1]?.[1]);
+    if (!href || !name || name === "Cartella superiore") continue;
+    try {
+      artists.push({ name, path: decodeURIComponent(href.replace(/\+/g, " ")) });
+    } catch {
+      // Ignore malformed remote links without breaking the whole catalog.
+    }
+  }
+  return artists;
+}
+
+function parseRemoteSongs(html, fallbackArtist = "") {
+  const songs = [];
+  const seen = new Set();
+  const rows = String(html || "").match(/<tr>[\s\S]*?<\/tr>/gi) || [];
+  for (const row of rows) {
+    const rawPath = row.match(/openDownloadGate\('([\s\S]*?)'\)/i)?.[1];
+    const remotePath = validRemoteMidiPath(rawPath);
+    if (!remotePath || seen.has(remotePath)) continue;
+    seen.add(remotePath);
+    const parts = remotePath.split("/");
+    const fileName = parts.pop() || "remote.mid";
+    const folder = parts.join("/") || fallbackArtist;
+    songs.push({
+      path: remotePath,
+      fileName,
+      title: fileName.replace(/\.(mid|midi|kar)$/i, ""),
+      artist: folder.replaceAll("/", " / "),
+      sourcePageUrl: `${REMOTE_CATALOG_ORIGIN}/browser.php?path=${encodeURIComponent(folder)}`,
+    });
+  }
+  return songs;
+}
+
+function parseRemoteSearchResults(html) {
+  const songs = [];
+  const rows = String(html || "").match(/<tr>[\s\S]*?<\/tr>/gi) || [];
+  for (const row of rows) {
+    const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)];
+    if (cells.length < 2) continue;
+    const fileName = decodeHtmlText(cells[0][1]);
+    const folder = decodeHtmlText(cells[1][1]);
+    const remotePath = validRemoteMidiPath(`${folder}/${fileName}`);
+    if (!remotePath) continue;
+    songs.push({
+      path: remotePath,
+      fileName,
+      title: fileName.replace(/\.(mid|midi|kar)$/i, ""),
+      artist: folder.replaceAll("/", " / "),
+      sourcePageUrl: `${REMOTE_CATALOG_ORIGIN}/browser.php?path=${encodeURIComponent(folder)}`,
+    });
+  }
+  return songs;
+}
+
 function extractHtmlMeta(html, baseUrl) {
   const getMeta = (prop) => {
     const r1 = new RegExp(`<meta[^>]+property=["']${prop}["'][^>]+content=["']([^"']+)["']`, "i");
@@ -481,6 +576,87 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/library/path") {
     await ensureSetup();
     sendJson(res, 200, { libraryDir: LIBRARY_DIR, jsonDir: JSON_DIR, dbPath: DB_PATH });
+    return true;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/remote-catalog/artists") {
+    try {
+      const html = await fetchRemoteCatalogPage("/browser.php");
+      sendJson(res, 200, { artists: parseRemoteArtists(html), source: REMOTE_CATALOG_ORIGIN });
+    } catch (error) {
+      sendJson(res, 502, { error: error.message });
+    }
+    return true;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/remote-catalog/songs") {
+    const artist = String(url.searchParams.get("artist") || "").trim();
+    if (!artist || artist.includes("\0") || artist.split("/").includes("..")) {
+      sendJson(res, 400, { error: "Artista/cartella non valida" });
+      return true;
+    }
+    try {
+      const html = await fetchRemoteCatalogPage("/browser.php", { path: artist });
+      sendJson(res, 200, { songs: parseRemoteSongs(html, artist), artist });
+    } catch (error) {
+      sendJson(res, 502, { error: error.message });
+    }
+    return true;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/remote-catalog/search") {
+    const query = String(url.searchParams.get("q") || "").trim();
+    if (query.length < 2) {
+      sendJson(res, 400, { error: "Inserisci almeno 2 caratteri" });
+      return true;
+    }
+    try {
+      const html = await fetchRemoteCatalogPage("/search.php", { q: query });
+      sendJson(res, 200, { songs: parseRemoteSearchResults(html), query });
+    } catch (error) {
+      sendJson(res, 502, { error: error.message });
+    }
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/remote-catalog/fetch") {
+    const payload = await readBodyJson(req);
+    const requested = Array.isArray(payload.paths) ? payload.paths : [];
+    if (requested.length > 20) {
+      sendJson(res, 400, { error: "Puoi scaricare al massimo 20 brani alla volta" });
+      return true;
+    }
+    const paths = requested.map(validRemoteMidiPath).filter(Boolean);
+    if (paths.length === 0 || paths.length !== requested.length) {
+      sendJson(res, 400, { error: "Selezione remota non valida (massimo 20 brani)" });
+      return true;
+    }
+    const files = [];
+    const errors = [];
+    for (const remotePath of paths) {
+      try {
+        const target = new URL("/file.php", REMOTE_CATALOG_ORIGIN);
+        target.searchParams.set("mode", "stream");
+        target.searchParams.set("file", remotePath);
+        const response = await fetch(target, {
+          headers: { "User-Agent": "PianoVisual/1.0 (+local desktop import)", Accept: "application/octet-stream,*/*" },
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const contentType = response.headers.get("content-type") || "";
+        const buffer = Buffer.from(await response.arrayBuffer());
+        if (contentType.includes("text/html") || buffer.length < 4 || buffer.subarray(0, 4).toString("ascii") !== "MThd") {
+          throw new Error("il sito non ha restituito un MIDI valido");
+        }
+        files.push({
+          path: remotePath,
+          fileName: sanitizeName(path.basename(remotePath)) || "remote.mid",
+          midiBase64: buffer.toString("base64"),
+        });
+      } catch (error) {
+        errors.push({ path: remotePath, error: error.message });
+      }
+    }
+    sendJson(res, files.length > 0 ? 200 : 502, { files, errors });
     return true;
   }
 

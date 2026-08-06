@@ -17,6 +17,19 @@ const el = {
   viewTitle: document.getElementById("viewTitle"),
   playlistCount: document.getElementById("playlistCount"),
   importPanel: document.getElementById("importPanel"),
+  remoteCatalogPanel: document.getElementById("remoteCatalogPanel"),
+  remoteCatalogSearch: document.getElementById("remoteCatalogSearch"),
+  remoteCatalogSearchBtn: document.getElementById("remoteCatalogSearchBtn"),
+  remoteCatalogClearBtn: document.getElementById("remoteCatalogClearBtn"),
+  remoteCatalogBackBtn: document.getElementById("remoteCatalogBackBtn"),
+  remoteCatalogStatus: document.getElementById("remoteCatalogStatus"),
+  remoteArtistsWrap: document.getElementById("remoteArtistsWrap"),
+  remoteSongsWrap: document.getElementById("remoteSongsWrap"),
+  remoteSongsBody: document.getElementById("remoteSongsBody"),
+  remoteSelectAllCheckbox: document.getElementById("remoteSelectAllCheckbox"),
+  remoteConvertBtn: document.getElementById("remoteConvertBtn"),
+  remoteImportBtn: document.getElementById("remoteImportBtn"),
+  remoteSelectionCount: document.getElementById("remoteSelectionCount"),
   songsTableBody: document.getElementById("songsTableBody"),
   contentGrid: document.getElementById("contentGrid"),
   playlistsSection: document.getElementById("playlistsSection"),
@@ -183,6 +196,13 @@ const state = {
   selectedPlaylistId: "",
   selectedGenre: "",
   selectedArtist: "",
+  remoteCatalog: {
+    artists: [],
+    songs: [],
+    selectedPaths: new Set(),
+    currentArtist: "",
+    loaded: false,
+  },
   theme: "dark",
   appVersion: "",
   updater: {
@@ -1502,6 +1522,7 @@ function renderViewLabels() {
     playlists: ["Playlist", "Le Tue Playlist"],
     genres: ["Generi", "Tag / Generi"],
     artists: ["Artisti", "Catalogo Artisti"],
+    remote: ["Catalogo remoto", "Artisti e brani MIDI"],
   };
   const [k, t] = map[state.view] || map.home;
   el.viewKicker.textContent = k;
@@ -1514,8 +1535,10 @@ function renderViewLabels() {
   }
   if (state.view === "genres" && state.selectedGenre) context = `Genere aperto: ${state.selectedGenre}`;
   if (state.view === "artists" && state.selectedArtist) context = `Artista aperto: ${state.selectedArtist}`;
+  if (state.view === "remote") context = "Catalogo consultato senza scaricare file MIDI";
   el.playlistCount.textContent = context;
   el.importPanel.classList.toggle("hidden", state.view !== "import");
+  el.remoteCatalogPanel.classList.toggle("hidden", state.view !== "remote");
   el.playlistsSection.classList.toggle("hidden", !["home", "library", "playlists", "genres", "artists"].includes(state.view));
   el.smartPlaylistsSection.classList.toggle("hidden", state.view !== "home");
   const libraryOnly = state.view === "library";
@@ -1628,6 +1651,7 @@ function selectNav(view) {
     for (const chip of el.studyChips) chip.classList.remove("active");
   }
   render();
+  if (view === "remote" && !state.remoteCatalog.loaded) loadRemoteArtists();
 }
 
 function onDirectoryPanelClick(event) {
@@ -1869,6 +1893,186 @@ function detectDuplicateForItem({ fileHash, title, artist }, existingSongs, seen
   };
 }
 
+function setRemoteCatalogStatus(message, tone = "") {
+  el.remoteCatalogStatus.textContent = message;
+  el.remoteCatalogStatus.classList.remove("ok", "error");
+  if (tone) el.remoteCatalogStatus.classList.add(tone);
+}
+
+function updateRemoteSelection() {
+  const validPaths = new Set(state.remoteCatalog.songs.map((song) => song.path));
+  state.remoteCatalog.selectedPaths = new Set([...state.remoteCatalog.selectedPaths].filter((item) => validPaths.has(item)));
+  const count = state.remoteCatalog.selectedPaths.size;
+  el.remoteSelectionCount.textContent = `${count} ${count === 1 ? "selezionato" : "selezionati"}`;
+  el.remoteConvertBtn.disabled = count === 0;
+  el.remoteImportBtn.disabled = count === 0;
+  el.remoteSelectAllCheckbox.checked = state.remoteCatalog.songs.length > 0 && count === state.remoteCatalog.songs.length;
+}
+
+function renderRemoteArtists(artists = state.remoteCatalog.artists) {
+  el.remoteArtistsWrap.innerHTML = artists.length
+    ? artists
+        .map(
+          (artist) => `<button class="remote-artist-card" type="button" data-remote-artist="${escapeHtml(artist.path)}">
+            <span>🎤</span><strong>${escapeHtml(artist.name)}</strong><small>Apri brani</small>
+          </button>`,
+        )
+        .join("")
+    : '<p class="empty-state">Nessun artista trovato.</p>';
+}
+
+function renderRemoteSongs() {
+  const songs = state.remoteCatalog.songs;
+  el.remoteSongsWrap.classList.toggle("hidden", songs.length === 0);
+  el.remoteSongsBody.innerHTML = songs
+    .map((song) => {
+      const checked = state.remoteCatalog.selectedPaths.has(song.path) ? "checked" : "";
+      return `<tr>
+        <td><input type="checkbox" data-remote-song-path="${escapeHtml(song.path)}" ${checked} /></td>
+        <td><strong>${escapeHtml(song.title)}</strong><br><small>${escapeHtml(song.fileName)}</small></td>
+        <td>${escapeHtml(song.artist || "-")}</td>
+        <td><a class="btn subtle" href="${escapeHtml(song.sourcePageUrl)}" target="_blank" rel="noopener noreferrer">Sito</a></td>
+      </tr>`;
+    })
+    .join("");
+  updateRemoteSelection();
+}
+
+async function loadRemoteArtists() {
+  setRemoteCatalogStatus("Caricamento artisti...");
+  try {
+    const result = await api("/api/remote-catalog/artists");
+    state.remoteCatalog.artists = Array.isArray(result.artists) ? result.artists : [];
+    state.remoteCatalog.loaded = true;
+    state.remoteCatalog.currentArtist = "";
+    state.remoteCatalog.songs = [];
+    state.remoteCatalog.selectedPaths.clear();
+    renderRemoteArtists();
+    renderRemoteSongs();
+    el.remoteCatalogBackBtn.classList.add("hidden");
+    setRemoteCatalogStatus(`${state.remoteCatalog.artists.length} artisti disponibili.`, "ok");
+  } catch (error) {
+    setRemoteCatalogStatus(error.message, "error");
+  }
+}
+
+async function openRemoteArtist(artistPath) {
+  setRemoteCatalogStatus(`Caricamento brani di ${artistPath}...`);
+  try {
+    const result = await api(`/api/remote-catalog/songs?artist=${encodeURIComponent(artistPath)}`);
+    state.remoteCatalog.currentArtist = artistPath;
+    state.remoteCatalog.songs = Array.isArray(result.songs) ? result.songs : [];
+    state.remoteCatalog.selectedPaths.clear();
+    el.remoteArtistsWrap.innerHTML = "";
+    el.remoteCatalogBackBtn.classList.remove("hidden");
+    renderRemoteSongs();
+    setRemoteCatalogStatus(`${state.remoteCatalog.songs.length} brani in ${artistPath}.`, "ok");
+  } catch (error) {
+    setRemoteCatalogStatus(error.message, "error");
+  }
+}
+
+async function searchRemoteCatalog() {
+  const query = el.remoteCatalogSearch.value.trim();
+  if (!query) {
+    renderRemoteArtists();
+    state.remoteCatalog.songs = [];
+    state.remoteCatalog.selectedPaths.clear();
+    renderRemoteSongs();
+    setRemoteCatalogStatus(`${state.remoteCatalog.artists.length} artisti disponibili.`, "ok");
+    return;
+  }
+  if (query.length < 2) {
+    setRemoteCatalogStatus("Inserisci almeno 2 caratteri.", "error");
+    return;
+  }
+  setRemoteCatalogStatus(`Ricerca di "${query}"...`);
+  try {
+    if (!state.remoteCatalog.loaded) await loadRemoteArtists();
+    const matchingArtists = state.remoteCatalog.artists.filter((artist) => normalizeText(artist.name).includes(normalizeText(query)));
+    const result = await api(`/api/remote-catalog/search?q=${encodeURIComponent(query)}`);
+    state.remoteCatalog.currentArtist = "";
+    state.remoteCatalog.songs = Array.isArray(result.songs) ? result.songs : [];
+    state.remoteCatalog.selectedPaths.clear();
+    renderRemoteArtists(matchingArtists);
+    renderRemoteSongs();
+    el.remoteCatalogBackBtn.classList.remove("hidden");
+    setRemoteCatalogStatus(`${matchingArtists.length} artisti e ${state.remoteCatalog.songs.length} brani trovati.`, "ok");
+  } catch (error) {
+    setRemoteCatalogStatus(error.message, "error");
+  }
+}
+
+async function prepareRemoteSelection(importAfterConversion = false) {
+  const selectedSongs = state.remoteCatalog.songs.filter((song) => state.remoteCatalog.selectedPaths.has(song.path));
+  if (selectedSongs.length === 0) {
+    toast("Seleziona almeno un brano remoto", "error");
+    return;
+  }
+  if (selectedSongs.length > 20) {
+    toast("Puoi convertire al massimo 20 brani alla volta", "error");
+    return;
+  }
+
+  showLoading(true);
+  setRemoteCatalogStatus(`Download su richiesta di ${selectedSongs.length} MIDI...`);
+  try {
+    const result = await api("/api/remote-catalog/fetch", {
+      method: "POST",
+      body: JSON.stringify({ paths: selectedSongs.map((song) => song.path) }),
+    });
+    const remoteByPath = new Map(selectedSongs.map((song) => [song.path, song]));
+    const existingSongs = state.db?.songs || [];
+    const seenHashes = new Set();
+    const seenTitleArtist = new Set();
+    const inferredLines = [];
+    state.batchItems = [];
+
+    for (const file of result.files || []) {
+      const remoteSong = remoteByPath.get(file.path);
+      const { item, inferredLine } = await buildBatchItemFromArrayBuffer({
+        sourceName: file.fileName,
+        arrBuffer: base64ToArrayBuffer(file.midiBase64),
+        existingSongs,
+        seenHashes,
+        seenTitleArtist,
+        titleOverride: remoteSong?.title || "",
+        artistOverride: remoteSong?.artist || "",
+      });
+      state.batchItems.push(item);
+      inferredLines.push(inferredLine);
+    }
+
+    const dedup = dedupeBatchItems(state.batchItems, el.batchDedupSelect?.value || "keep_first");
+    state.batchItems = dedup.kept;
+    state.duplicateCandidates = getExternalDuplicateCandidates(state.batchItems);
+    if (state.batchItems.length === 0) throw new Error("Nessun MIDI remoto convertibile");
+    state.preview = state.batchItems[0];
+    el.jsonOutput.value = JSON.stringify(state.preview.jsonData, null, 2);
+    el.filenameInsights.value = inferredLines.join("\n");
+    el.saveBatchBtn.disabled = false;
+    el.downloadBtn.disabled = false;
+
+    const failed = Array.isArray(result.errors) ? result.errors.length : 0;
+    setRemoteCatalogStatus(`${state.batchItems.length} convertiti${failed ? `, ${failed} non disponibili` : ""}.`, failed ? "error" : "ok");
+    if (importAfterConversion) {
+      await saveBatchToLibrary();
+      if (state.batchItems.length === 0) {
+        state.remoteCatalog.selectedPaths.clear();
+        renderRemoteSongs();
+      }
+    } else {
+      selectNav("import");
+      setImportStatus(`Anteprima pronta da catalogo remoto: ${state.batchItems.length} brani.`, "ok");
+    }
+  } catch (error) {
+    setRemoteCatalogStatus(`Errore: ${error.message}`, "error");
+    toast(error.message, "error");
+  } finally {
+    showLoading(false);
+  }
+}
+
 async function buildBatchItemFromArrayBuffer({
   sourceName,
   arrBuffer,
@@ -1876,12 +2080,13 @@ async function buildBatchItemFromArrayBuffer({
   seenHashes,
   seenTitleArtist,
   titleOverride = "",
+  artistOverride = "",
 }) {
   const fileHash = await sha256Hex(arrBuffer);
   const midi = new Midi(arrBuffer);
   const baseName = sourceName.replace(/\.(mid|midi)$/i, "");
   const title = repairMojibake(titleOverride || el.metaTitle.value.trim() || baseName);
-  const artist = repairMojibake(el.metaArtist.value.trim());
+  const artist = repairMojibake(artistOverride || el.metaArtist.value.trim());
   const composer = repairMojibake(el.metaComposer.value.trim());
   const genre = repairMojibake(el.metaGenre.value.trim());
   const mergedTags = parseTagsInput(el.metaTags.value);
@@ -3493,6 +3698,49 @@ function bindEvents() {
     }
     render();
   });
+
+  el.remoteArtistsWrap.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-remote-artist]");
+    if (button) openRemoteArtist(button.dataset.remoteArtist);
+  });
+  el.remoteSongsBody.addEventListener("change", (event) => {
+    const checkbox = event.target.closest("[data-remote-song-path]");
+    if (!checkbox) return;
+    if (checkbox.checked) state.remoteCatalog.selectedPaths.add(checkbox.dataset.remoteSongPath);
+    else state.remoteCatalog.selectedPaths.delete(checkbox.dataset.remoteSongPath);
+    updateRemoteSelection();
+  });
+  el.remoteSelectAllCheckbox.addEventListener("change", () => {
+    state.remoteCatalog.selectedPaths.clear();
+    if (el.remoteSelectAllCheckbox.checked) {
+      for (const song of state.remoteCatalog.songs.slice(0, 20)) state.remoteCatalog.selectedPaths.add(song.path);
+      if (state.remoteCatalog.songs.length > 20) toast("Selezionati i primi 20 brani", "ok");
+    }
+    renderRemoteSongs();
+  });
+  el.remoteCatalogSearchBtn.addEventListener("click", searchRemoteCatalog);
+  el.remoteCatalogSearch.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      searchRemoteCatalog();
+    }
+  });
+  el.remoteCatalogClearBtn.addEventListener("click", () => {
+    el.remoteCatalogSearch.value = "";
+    loadRemoteArtists();
+  });
+  el.remoteCatalogBackBtn.addEventListener("click", () => {
+    el.remoteCatalogSearch.value = "";
+    state.remoteCatalog.currentArtist = "";
+    state.remoteCatalog.songs = [];
+    state.remoteCatalog.selectedPaths.clear();
+    renderRemoteArtists();
+    renderRemoteSongs();
+    el.remoteCatalogBackBtn.classList.add("hidden");
+    setRemoteCatalogStatus(`${state.remoteCatalog.artists.length} artisti disponibili.`, "ok");
+  });
+  el.remoteConvertBtn.addEventListener("click", () => prepareRemoteSelection(false));
+  el.remoteImportBtn.addEventListener("click", () => prepareRemoteSelection(true));
 
   el.midiFileInput.addEventListener("change", () => {
     const files = [...(el.midiFileInput.files || [])];

@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.9] - 2026-08-06
+### Added
+- Catalogo remoto Kara per Tutti con elenco artisti, apertura cartelle e ricerca globale per artista o titolo.
+- Selezione fino a 20 brani remoti con conversione JSON o importazione diretta nella libreria.
+- Download MIDI differito fino all'azione esplicita dell'utente e validazione server-side di percorsi e contenuti.
+
 ## [1.0.8] - 2026-07-25
 ### Added
 - Eliminazione multipla dei brani selezionati dalla libreria, con conferma unica e conteggio degli elementi.

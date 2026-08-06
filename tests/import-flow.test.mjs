@@ -121,6 +121,20 @@ test.beforeEach(async () => {
   await resetLibrary();
 });
 
+test('remote catalog rejects unsafe or oversized deferred downloads', async () => {
+  await assert.rejects(
+    api('/api/remote-catalog/fetch', { method: 'POST', body: JSON.stringify({ paths: ['../secret.mid'] }) }),
+    /400/,
+  );
+  await assert.rejects(
+    api('/api/remote-catalog/fetch', {
+      method: 'POST',
+      body: JSON.stringify({ paths: Array.from({ length: 21 }, (_, i) => `Artist/Song-${i}.mid`) }),
+    }),
+    /400/,
+  );
+});
+
 test('overwrite succeeded keeps one song and updates metadata', async () => {
   const first = makeItem({ sourceFileName: 'same.mid', title: 'Old Title', artist: 'A', midiSeed: 'same' });
   const second = makeItem({ sourceFileName: 'same.mid', title: 'New Title', artist: 'A', midiSeed: 'same' });

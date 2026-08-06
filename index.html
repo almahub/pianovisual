@@ -36,6 +36,7 @@
           <button class="nav-item" data-view="favorites">❤️ Preferiti</button>
           <button class="nav-item" data-view="playlists">📚 Playlist</button>
           <button class="nav-item" data-view="library">🔍 Libreria</button>
+          <button class="nav-item" data-view="remote">🌐 Catalogo remoto</button>
           <button class="nav-item" data-view="import">⤴ Importa MIDI</button>
         </nav>
 
@@ -276,6 +277,36 @@
                   <summary>Anteprima JSON primo file</summary>
                   <textarea id="jsonOutput" readonly spellcheck="false"></textarea>
                 </details>
+              </section>
+
+              <section id="remoteCatalogPanel" class="import-panel remote-catalog hidden" aria-label="Catalogo remoto MIDI">
+                <div class="remote-catalog-head">
+                  <div>
+                    <h3>Catalogo remoto</h3>
+                    <p class="panel-subtitle">Sfoglia artisti e brani senza scaricare MIDI. Il file viene letto solo quando converti o importi.</p>
+                  </div>
+                  <a class="btn subtle" href="https://ftp.karapertutti.altervista.org/browser.php" target="_blank" rel="noopener noreferrer">Apri sito sorgente</a>
+                </div>
+                <div class="remote-toolbar">
+                  <input id="remoteCatalogSearch" type="search" placeholder="Cerca artista o titolo..." />
+                  <button id="remoteCatalogSearchBtn" class="btn" type="button">Cerca</button>
+                  <button id="remoteCatalogClearBtn" class="btn subtle" type="button">Azzera</button>
+                  <button id="remoteCatalogBackBtn" class="btn subtle hidden" type="button">← Tutti gli artisti</button>
+                </div>
+                <p id="remoteCatalogStatus" class="status">Apri il catalogo per caricare gli artisti.</p>
+                <div id="remoteArtistsWrap" class="remote-artists-grid"></div>
+                <div id="remoteSongsWrap" class="table-wrap hidden">
+                  <table>
+                    <thead><tr><th><input id="remoteSelectAllCheckbox" type="checkbox" title="Seleziona tutti i risultati" /></th><th>Brano</th><th>Artista / cartella</th><th>Sorgente</th></tr></thead>
+                    <tbody id="remoteSongsBody"></tbody>
+                  </table>
+                </div>
+                <div class="import-actions">
+                  <button id="remoteConvertBtn" class="btn" type="button" disabled>Converti selezionati</button>
+                  <button id="remoteImportBtn" class="btn" type="button" disabled>Importa selezionati</button>
+                  <span id="remoteSelectionCount" class="mini-note">0 selezionati</span>
+                </div>
+                <p class="mini-note">Fonte esterna: usa solo contenuti per i quali disponi dei diritti necessari. La disponibilità dipende dal sito sorgente.</p>
               </section>
 
               <div id="tableWrap" class="table-wrap">
