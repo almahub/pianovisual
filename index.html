@@ -54,9 +54,19 @@
           <p class="block-title">Backup</p>
           <button id="backupBtn" class="chip">Export JSON folder</button>
           <button id="importArchiveBtn" class="chip">Import archivio</button>
+          <button id="importJsonFolderBtn" class="chip">Importa cartella JSON</button>
           <button id="openLibraryFolderBtn" class="chip">Apri cartella libreria</button>
           <button id="syncLibraryBtn" class="chip">Riallinea libreria</button>
           <input id="archiveFileInput" type="file" accept=".zip,.json" multiple class="hidden" />
+          <input id="jsonFolderInput" type="file" accept=".json,application/json" multiple webkitdirectory class="hidden" />
+        </section>
+
+        <section class="sidebar-block">
+          <p class="block-title">Quest 3</p>
+          <button id="questStatusBtn" class="chip">Rileva Quest 3</button>
+          <button id="questPullBtn" class="chip">Importa JSON dal Quest</button>
+          <button id="questPushBtn" class="chip">Invia JSON al Quest</button>
+          <p id="questStatusText" class="mini-note">Richiede ADB e debug USB.</p>
         </section>
 
         <section class="sidebar-block">
@@ -205,6 +215,7 @@
                   <button id="convertBtn" class="btn" type="button">Converti anteprima</button>
                   <button id="saveBatchBtn" class="btn" type="button" disabled>Importa e salva batch</button>
                   <button id="importJsonBtn" class="btn subtle" type="button">Importa JSON brani</button>
+                  <button id="importJsonFolderPanelBtn" class="btn subtle" type="button">Importa cartella JSON</button>
                   <button id="cancelImportBtn" class="btn subtle danger hidden" type="button">Annulla import</button>
                   <button id="downloadBtn" class="btn subtle" type="button" disabled>Scarica anteprima JSON</button>
                   <button id="downloadImportReportBtn" class="btn subtle" type="button" disabled>Scarica report import</button>

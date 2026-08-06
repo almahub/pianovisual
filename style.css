@@ -488,6 +488,14 @@ textarea {
   color: #ff8e8e;
 }
 
+.mini-note.ok {
+  color: #7ad49b;
+}
+
+.mini-note.error {
+  color: #ff8e8e;
+}
+
 .import-grid,
 .meta-edit-grid,
 .recognition-grid {

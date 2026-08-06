@@ -1,7 +1,14 @@
 const { app, BrowserWindow, Menu, dialog, shell, ipcMain } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs/promises");
+const os = require("node:os");
+const crypto = require("node:crypto");
+const { execFile } = require("node:child_process");
+const { promisify } = require("node:util");
 const { pathToFileURL } = require("node:url");
+
+const execFileAsync = promisify(execFile);
+const QUEST_JSON_DIR = "/sdcard/Android/data/com.ZarApps.PianoVision/files";
 
 const isDev = !app.isPackaged;
 const DEFAULT_PORT = 5173;
@@ -45,6 +52,64 @@ async function ensureRuntimeLibrary() {
     const seed = await fs.readFile(dbExamplePath(), "utf8");
     await fs.writeFile(dbPath, seed, "utf8");
   }
+}
+
+async function readJsonFilesRecursive(rootDir, limit = 5000) {
+  const items = [];
+  const errors = [];
+  async function visit(dir) {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (items.length + errors.length >= limit) throw new Error(`Limite di ${limit} file JSON superato`);
+      const absolute = path.join(dir, entry.name);
+      if (entry.isDirectory()) await visit(absolute);
+      else if (entry.isFile() && entry.name.toLowerCase().endsWith(".json")) {
+        try {
+          items.push({ fileName: entry.name, jsonData: JSON.parse(await fs.readFile(absolute, "utf8")) });
+        } catch (error) {
+          errors.push({ sourceFileName: entry.name, status: "error", reason: `JSON parse error: ${error.message}` });
+        }
+      }
+    }
+  }
+  await visit(rootDir);
+  return { items, errors };
+}
+
+async function runAdb(args) {
+  try {
+    return await execFileAsync("adb", args, { windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
+  } catch (error) {
+    if (error.code === "ENOENT") throw new Error("ADB non trovato. Installa Android SDK Platform Tools e aggiungi adb al PATH.");
+    throw new Error(String(error.stderr || error.message || "Comando ADB fallito").trim());
+  }
+}
+
+async function getQuestDevice() {
+  const { stdout } = await runAdb(["devices"]);
+  const rows = stdout.split(/\r?\n/).slice(1).map((line) => line.trim()).filter(Boolean);
+  const authorized = rows.filter((line) => /\tdevice$/.test(line)).map((line) => line.split(/\s+/)[0]);
+  if (authorized.length === 0) {
+    const unauthorized = rows.some((line) => /\tunauthorized$/.test(line));
+    throw new Error(unauthorized ? "Quest collegato ma non autorizzato: conferma il debug USB nel visore." : "Nessun Quest autorizzato rilevato via ADB.");
+  }
+  if (authorized.length > 1) throw new Error("Sono collegati più dispositivi ADB. Lascia collegato solo il Quest da sincronizzare.");
+  return authorized[0];
+}
+
+async function remoteQuestFiles(serial) {
+  const command = `mkdir -p '${QUEST_JSON_DIR}' && sha256sum '${QUEST_JSON_DIR}'/*.json 2>/dev/null || true`;
+  const { stdout } = await runAdb(["-s", serial, "shell", command]);
+  return stdout
+    .split(/\r?\n/)
+    .map((line) => line.match(/^([a-fA-F0-9]{64})\s+(.+\.json)$/))
+    .filter(Boolean)
+    .map((match) => ({ hash: match[1].toLowerCase(), remotePath: match[2], fileName: path.posix.basename(match[2]) }))
+    .filter((item) => path.posix.basename(item.fileName) === item.fileName);
+}
+
+async function sha256File(filePath) {
+  return crypto.createHash("sha256").update(await fs.readFile(filePath)).digest("hex");
 }
 
 async function startBackend() {
@@ -144,6 +209,90 @@ ipcMain.handle("library:open-folder", async () => {
   const result = await shell.openPath(runtimeLibraryDir());
   if (result) return { ok: false, error: result };
   return { ok: true, path: runtimeLibraryDir() };
+});
+
+ipcMain.handle("json:select-folder", async () => {
+  const selected = await dialog.showOpenDialog(mainWindow, {
+    title: "Seleziona cartella contenente JSON",
+    properties: ["openDirectory"],
+  });
+  if (selected.canceled || !selected.filePaths[0]) return { canceled: true, items: [], errors: [] };
+  const result = await readJsonFilesRecursive(selected.filePaths[0]);
+  return { ...result, canceled: false, folderPath: selected.filePaths[0] };
+});
+
+ipcMain.handle("quest:status", async () => {
+  const serial = await getQuestDevice();
+  const files = await remoteQuestFiles(serial);
+  return { ok: true, serial, remotePath: QUEST_JSON_DIR, jsonCount: files.length };
+});
+
+ipcMain.handle("quest:pull-json", async () => {
+  const serial = await getQuestDevice();
+  const remoteFiles = await remoteQuestFiles(serial);
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pianovisual-quest-"));
+  const errors = [];
+  try {
+    for (const item of remoteFiles) {
+      try {
+        await runAdb(["-s", serial, "pull", item.remotePath, path.join(tempDir, item.fileName)]);
+      } catch (error) {
+        errors.push({ sourceFileName: item.fileName, status: "error", reason: error.message });
+      }
+    }
+    const parsed = await readJsonFilesRecursive(tempDir);
+    return { serial, remotePath: QUEST_JSON_DIR, items: parsed.items, errors: [...errors, ...parsed.errors] };
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+ipcMain.handle("quest:preview-push", async () => {
+  const serial = await getQuestDevice();
+  const localDir = path.join(runtimeLibraryDir(), "json");
+  const localNames = (await fs.readdir(localDir)).filter((name) => name.toLowerCase().endsWith(".json") && path.basename(name) === name);
+  const remoteMap = new Map((await remoteQuestFiles(serial)).map((item) => [item.fileName, item.hash]));
+  const files = [];
+  for (const fileName of localNames) {
+    const hash = await sha256File(path.join(localDir, fileName));
+    const remoteHash = remoteMap.get(fileName) || "";
+    files.push({ fileName, status: !remoteHash ? "new" : remoteHash === hash ? "same" : "changed" });
+  }
+  return {
+    serial,
+    remotePath: QUEST_JSON_DIR,
+    files,
+    summary: {
+      new: files.filter((item) => item.status === "new").length,
+      changed: files.filter((item) => item.status === "changed").length,
+      same: files.filter((item) => item.status === "same").length,
+    },
+  };
+});
+
+ipcMain.handle("quest:push-json", async (_, requestedNames) => {
+  const serial = await getQuestDevice();
+  const names = Array.isArray(requestedNames) ? [...new Set(requestedNames)] : [];
+  if (names.length === 0 || names.length > 5000) throw new Error("Selezione file non valida");
+  const localDir = path.join(runtimeLibraryDir(), "json");
+  await runAdb(["-s", serial, "shell", "mkdir", "-p", QUEST_JSON_DIR]);
+  let copied = 0;
+  const errors = [];
+  for (const fileName of names) {
+    if (path.basename(fileName) !== fileName || !fileName.toLowerCase().endsWith(".json")) {
+      errors.push({ fileName, error: "Nome file non valido" });
+      continue;
+    }
+    try {
+      const localPath = path.join(localDir, fileName);
+      await fs.access(localPath);
+      await runAdb(["-s", serial, "push", localPath, `${QUEST_JSON_DIR}/${fileName}`]);
+      copied += 1;
+    } catch (error) {
+      errors.push({ fileName, error: error.message });
+    }
+  }
+  return { serial, remotePath: QUEST_JSON_DIR, copied, errors };
 });
 
 function setupAutoUpdater() {

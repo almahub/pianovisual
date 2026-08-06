@@ -8,6 +8,8 @@ Tool desktop/web locale per convertire **piu file MIDI in JSON compatibile Piano
 - Organizzazione libreria (playlist, tag, preferiti, metadata)
 - Preview/visualizer e strumenti di studio
 - Import/Export archivio JSON (anche ZIP) con gestione conflitti
+- Import ricorsivo di intere cartelle JSON
+- Sincronizzazione opzionale con Quest 3 via ADB (anteprima hash, nessuna cancellazione automatica)
 
 ## Per chi e pensato
 - Studenti di pianoforte
@@ -64,6 +66,13 @@ Output in `dist/` (installer NSIS).
 4. Vai su `Export JSON folder` per scaricare lo ZIP.
 5. Estrai i JSON e copiali su Quest 3 nel percorso:
    - `Questo PC\Quest 3\Memoria condivisa interna\Android\data\com.ZarApps.PianoVision\files`
+
+### Sincronizzazione Quest 3 via ADB (desktop)
+- Installa Android SDK Platform Tools e assicurati che `adb` sia disponibile nel `PATH`.
+- Abilita la modalita sviluppatore/debug USB sul Quest e autorizza il computer nel visore.
+- Usa `Rileva Quest 3`, quindi scegli `Importa JSON dal Quest` oppure `Invia JSON al Quest`.
+- Prima dell'invio PianoVisual confronta gli hash e mostra nuovi, modificati e gia uguali.
+- La sincronizzazione non elimina mai automaticamente file dal Quest.
 
 ## Struttura progetto
 - `app.js`: logica frontend (import, UI, visualizer)

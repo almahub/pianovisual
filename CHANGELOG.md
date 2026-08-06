@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.10] - 2026-08-06
+### Added
+- Import ricorsivo di cartelle JSON con le policy di deduplicazione e conflitto esistenti.
+- Sincronizzazione desktop Quest 3 via ADB: rilevamento dispositivo, import dal visore e invio differenziale basato su hash.
+- Anteprima prima dell'invio al Quest e garanzia di nessuna cancellazione automatica.
+
 ## [1.0.9] - 2026-08-06
 ### Added
 - Catalogo remoto Kara per Tutti con elenco artisti, apertura cartelle e ricerca globale per artista o titolo.

@@ -60,8 +60,14 @@ const el = {
   managePlaylistBtn: document.getElementById("managePlaylistBtn"),
   backupBtn: document.getElementById("backupBtn"),
   importArchiveBtn: document.getElementById("importArchiveBtn"),
+  importJsonFolderBtn: document.getElementById("importJsonFolderBtn"),
+  jsonFolderInput: document.getElementById("jsonFolderInput"),
   openLibraryFolderBtn: document.getElementById("openLibraryFolderBtn"),
   syncLibraryBtn: document.getElementById("syncLibraryBtn"),
+  questStatusBtn: document.getElementById("questStatusBtn"),
+  questPullBtn: document.getElementById("questPullBtn"),
+  questPushBtn: document.getElementById("questPushBtn"),
+  questStatusText: document.getElementById("questStatusText"),
   themeLightBtn: document.getElementById("themeLightBtn"),
   themeDarkBtn: document.getElementById("themeDarkBtn"),
   archiveFileInput: document.getElementById("archiveFileInput"),
@@ -80,6 +86,7 @@ const el = {
   convertBtn: document.getElementById("convertBtn"),
   saveBatchBtn: document.getElementById("saveBatchBtn"),
   importJsonBtn: document.getElementById("importJsonBtn"),
+  importJsonFolderPanelBtn: document.getElementById("importJsonFolderPanelBtn"),
   importJsonFileInput: document.getElementById("importJsonFileInput"),
   cancelImportBtn: document.getElementById("cancelImportBtn"),
   downloadBtn: document.getElementById("downloadBtn"),
@@ -3422,6 +3429,48 @@ async function syncLibraryFromDisk() {
   }
 }
 
+async function importJsonItems(items, readErrors = [], kind = "json-archive") {
+  if (items.length === 0) {
+    toast("Nessun file JSON valido trovato", "error");
+    return null;
+  }
+
+  const dedupMode = el.archiveDedupPolicySelect?.value || "keep_first";
+  const { kept, dropped } = dedupeJsonArchiveItems(items, dedupMode);
+  if (kept.length === 0) {
+    toast("Nessun JSON importabile dopo dedup interno", "error");
+    return null;
+  }
+
+  const result = await api("/api/library/import-json-archive", {
+    method: "POST",
+    body: JSON.stringify({
+      items: kept,
+      conflictPolicy: el.archiveConflictPolicySelect?.value || "skip",
+      dedupPolicy: dedupMode,
+    }),
+  });
+  await refreshDb();
+  render();
+  const reportRows = Array.isArray(result.report) ? result.report : [];
+  const skipped = reportRows.filter((row) => row.status === "skipped").length + dropped.length;
+  const overwritten = Number(result.overwrittenCount || 0);
+  const errored = reportRows.filter((row) => row.status === "error").length + readErrors.length;
+  setLastImportReport({
+    kind,
+    createdAt: new Date().toISOString(),
+    summary: { total: items.length + readErrors.length, imported: Number(result.importedCount || 0), overwritten, skipped, errored },
+    report: [
+      ...reportRows,
+      ...dropped.map((drop) => ({ sourceFileName: drop.item?.fileName || "-", status: "skipped", reason: drop.reason })),
+      ...readErrors,
+    ],
+  });
+  const msg = `Import JSON: ${result.importedCount} importati, ${overwritten} sovrascritti, ${skipped} saltati, ${errored} errori.`;
+  toast(msg, errored > 0 ? "error" : "ok");
+  return result;
+}
+
 async function importArchiveFiles(fileList) {
   const files = [...(fileList || [])];
   if (files.length === 0) return;
@@ -3455,55 +3504,7 @@ async function importArchiveFiles(fileList) {
       }
     }
 
-    if (items.length === 0) {
-      toast("Archivio non valido: nessun file JSON trovato", "error");
-      return;
-    }
-
-    const dedupMode = el.archiveDedupPolicySelect?.value || "keep_first";
-    const { kept, dropped } = dedupeJsonArchiveItems(items, dedupMode);
-    const toImport = kept;
-    if (toImport.length === 0) {
-      toast("Nessun JSON importabile dopo dedup interno", "error");
-      return;
-    }
-
-    const result = await api("/api/library/import-json-archive", {
-      method: "POST",
-      body: JSON.stringify({
-        items: toImport,
-        conflictPolicy: el.archiveConflictPolicySelect?.value || "skip",
-        dedupPolicy: dedupMode,
-      }),
-    });
-    await refreshDb();
-    render();
-    const reportRows = Array.isArray(result.report) ? result.report : [];
-    const skipped = reportRows.filter((r) => r.status === "skipped").length + dropped.length;
-    const overwritten = Number(result.overwrittenCount || 0);
-    const errored = reportRows.filter((r) => r.status === "error").length + readErrors.length;
-    setLastImportReport({
-      kind: "json-archive",
-      createdAt: new Date().toISOString(),
-      summary: {
-        total: items.length,
-        imported: Number(result.importedCount || 0),
-        overwritten,
-        skipped,
-        errored,
-      },
-      report: [
-        ...reportRows,
-        ...dropped.map((d) => ({
-          sourceFileName: d.item?.fileName || "-",
-          status: "skipped",
-          reason: d.reason,
-        })),
-        ...readErrors,
-      ],
-    });
-    const msg = `Import archivio: ${result.importedCount} importati, ${overwritten} sovrascritti, ${skipped} saltati, ${errored} errori.`;
-    toast(msg, errored > 0 ? "error" : "ok");
+    await importJsonItems(items, readErrors, "json-archive");
   } catch (error) {
     toast(`Import archivio fallito: ${error.message}`, "error");
   }
@@ -3511,6 +3512,108 @@ async function importArchiveFiles(fileList) {
     showLoading(false);
     el.archiveFileInput.value = "";
     if (el.importJsonFileInput) el.importJsonFileInput.value = "";
+  }
+}
+
+function setQuestStatus(message, tone = "") {
+  el.questStatusText.textContent = message;
+  el.questStatusText.classList.remove("ok", "error");
+  if (tone) el.questStatusText.classList.add(tone);
+}
+
+async function importJsonFolder() {
+  if (!window.pianovisualDesktop?.selectJsonFolder) {
+    el.jsonFolderInput.click();
+    return;
+  }
+  showLoading(true);
+  try {
+    const result = await window.pianovisualDesktop.selectJsonFolder();
+    if (result?.canceled) return;
+    const items = Array.isArray(result?.items) ? result.items : [];
+    const errors = Array.isArray(result?.errors) ? result.errors : [];
+    await importJsonItems(items, errors, "json-folder");
+  } catch (error) {
+    toast(`Import cartella fallito: ${error.message}`, "error");
+  } finally {
+    showLoading(false);
+  }
+}
+
+async function checkQuestStatus() {
+  if (!window.pianovisualDesktop?.questStatus) {
+    setQuestStatus("Sincronizzazione Quest disponibile solo nell'app desktop.", "error");
+    return;
+  }
+  setQuestStatus("Ricerca Quest 3...");
+  try {
+    const result = await window.pianovisualDesktop.questStatus();
+    setQuestStatus(`Quest collegato (${result.serial}) · ${result.jsonCount} JSON sul dispositivo`, "ok");
+  } catch (error) {
+    setQuestStatus(error.message, "error");
+  }
+}
+
+async function importJsonFromQuest() {
+  if (!window.pianovisualDesktop?.questPullJson) {
+    setQuestStatus("Import dal Quest disponibile solo nell'app desktop.", "error");
+    return;
+  }
+  showLoading(true);
+  setQuestStatus("Lettura JSON dal Quest...");
+  try {
+    const result = await window.pianovisualDesktop.questPullJson();
+    const items = Array.isArray(result?.items) ? result.items : [];
+    const errors = Array.isArray(result?.errors) ? result.errors : [];
+    if (items.length === 0) {
+      setQuestStatus("Nessun JSON leggibile trovato sul Quest.", errors.length ? "error" : "");
+      return;
+    }
+    if (!confirm(`Trovati ${items.length} JSON sul Quest. Importarli nella libreria usando la policy conflitti corrente?`)) return;
+    await importJsonItems(items, errors, "quest-pull");
+    setQuestStatus(`Import dal Quest completato: ${items.length} JSON analizzati.`, errors.length ? "error" : "ok");
+  } catch (error) {
+    setQuestStatus(error.message, "error");
+    toast(`Import dal Quest fallito: ${error.message}`, "error");
+  } finally {
+    showLoading(false);
+  }
+}
+
+async function pushJsonToQuest() {
+  if (!window.pianovisualDesktop?.questPreviewPush) {
+    setQuestStatus("Invio al Quest disponibile solo nell'app desktop.", "error");
+    return;
+  }
+  showLoading(true);
+  setQuestStatus("Confronto libreria con Quest...");
+  try {
+    const preview = await window.pianovisualDesktop.questPreviewPush();
+    const files = Array.isArray(preview?.files) ? preview.files : [];
+    const toCopy = files.filter((item) => item.status === "new" || item.status === "changed");
+    const summary = preview?.summary || { new: 0, changed: 0, same: 0 };
+    if (toCopy.length === 0) {
+      setQuestStatus(`Quest già aggiornato · ${summary.same || 0} file uguali`, "ok");
+      return;
+    }
+    const approved = confirm(
+      `Sincronizzare ${toCopy.length} JSON verso il Quest?\n\n` +
+        `Nuovi: ${summary.new || 0}\nModificati: ${summary.changed || 0}\nGià uguali: ${summary.same || 0}\n\n` +
+        "I file omonimi modificati saranno sovrascritti. Nessun file verrà eliminato.",
+    );
+    if (!approved) {
+      setQuestStatus("Invio annullato dopo l'anteprima.");
+      return;
+    }
+    const result = await window.pianovisualDesktop.questPushJson(toCopy.map((item) => item.fileName));
+    const failures = Array.isArray(result?.errors) ? result.errors.length : 0;
+    setQuestStatus(`${result.copied || 0} JSON inviati al Quest${failures ? ` · ${failures} errori` : ""}.`, failures ? "error" : "ok");
+    toast(`Sincronizzazione Quest: ${result.copied || 0} file copiati`, failures ? "error" : "ok");
+  } catch (error) {
+    setQuestStatus(error.message, "error");
+    toast(`Invio al Quest fallito: ${error.message}`, "error");
+  } finally {
+    showLoading(false);
   }
 }
 
@@ -3795,6 +3898,7 @@ function bindEvents() {
   });
   el.saveBatchBtn.addEventListener("click", saveBatchToLibrary);
   el.importJsonBtn.addEventListener("click", () => el.importJsonFileInput.click());
+  el.importJsonFolderPanelBtn.addEventListener("click", importJsonFolder);
   el.importJsonFileInput.addEventListener("change", () => importArchiveFiles(el.importJsonFileInput.files));
   el.cancelImportBtn.addEventListener("click", () => {
     state.importCancelled = true;
@@ -3806,10 +3910,18 @@ function bindEvents() {
   el.newPlaylistBtn.addEventListener("click", createPlaylist);
   el.managePlaylistBtn.addEventListener("click", managePlaylist);
   el.backupBtn.addEventListener("click", exportBackup);
+  el.importJsonFolderBtn.addEventListener("click", importJsonFolder);
+  el.jsonFolderInput.addEventListener("change", async () => {
+    await importArchiveFiles(el.jsonFolderInput.files);
+    el.jsonFolderInput.value = "";
+  });
   el.openLibraryFolderBtn.addEventListener("click", openLibraryFolder);
   el.syncLibraryBtn.addEventListener("click", syncLibraryFromDisk);
   el.importArchiveBtn.addEventListener("click", () => el.archiveFileInput.click());
   el.archiveFileInput.addEventListener("change", () => importArchiveFiles(el.archiveFileInput.files));
+  el.questStatusBtn.addEventListener("click", checkQuestStatus);
+  el.questPullBtn.addEventListener("click", importJsonFromQuest);
+  el.questPushBtn.addEventListener("click", pushJsonToQuest);
   el.themeLightBtn.addEventListener("click", () => applyTheme("light"));
   el.themeDarkBtn.addEventListener("click", () => applyTheme("dark"));
 

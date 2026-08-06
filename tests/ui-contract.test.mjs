@@ -21,6 +21,11 @@ test("ui critical controls exist for key workflows", async () => {
     "remoteCatalogSearch",
     "remoteConvertBtn",
     "remoteImportBtn",
+    "importJsonFolderBtn",
+    "importJsonFolderPanelBtn",
+    "questStatusBtn",
+    "questPullBtn",
+    "questPushBtn",
     "detailInstrumentsBadges",
     "downloadImportReportBtn",
     "archiveConflictPolicySelect",
@@ -29,5 +34,12 @@ test("ui critical controls exist for key workflows", async () => {
   ];
   for (const id of requiredIds) {
     assert.equal(html.includes(`id=\"${id}\"`), true, `missing #${id}`);
+  }
+});
+
+test("desktop bridge exposes folder import and safe Quest sync actions", async () => {
+  const preload = await fs.readFile(path.join(root, "electron", "preload.cjs"), "utf8");
+  for (const method of ["selectJsonFolder", "questStatus", "questPullJson", "questPreviewPush", "questPushJson"]) {
+    assert.equal(preload.includes(`${method}:`), true, `missing desktop bridge method ${method}`);
   }
 });
