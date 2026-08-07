@@ -376,12 +376,13 @@
                 <p id="detailTitle" class="detail-title"></p>
                 <p id="detailSubtitle" class="detail-subtitle"></p>
                 <ul id="detailMeta" class="detail-meta"></ul>
-                <div id="detailInstrumentsBadges" class="instrument-badges"></div>
-
                 <details open>
                   <summary>Visualizer</summary>
                   <canvas id="visualizerCanvas" width="520" height="220"></canvas>
-                  <div id="visualizerLegend" class="visualizer-legend"></div>
+                  <div class="visualizer-controls">
+                    <div id="visualizerLegend" class="visualizer-legend" aria-label="Strumenti attivi"></div>
+                    <button id="exportVisualizerSelectionBtn" class="btn subtle viz-export-btn" type="button">Esporta selezione</button>
+                  </div>
                 </details>
 
                 <details open>

@@ -118,7 +118,6 @@ const el = {
   detailTitle: document.getElementById("detailTitle"),
   detailSubtitle: document.getElementById("detailSubtitle"),
   detailMeta: document.getElementById("detailMeta"),
-  detailInstrumentsBadges: document.getElementById("detailInstrumentsBadges"),
 
   editTitle: document.getElementById("editTitle"),
   editArtist: document.getElementById("editArtist"),
@@ -142,6 +141,7 @@ const el = {
   playerSpeedSelect: document.getElementById("playerSpeedSelect"),
   visualizerCanvas: document.getElementById("visualizerCanvas"),
   visualizerLegend: document.getElementById("visualizerLegend"),
+  exportVisualizerSelectionBtn: document.getElementById("exportVisualizerSelectionBtn"),
   footerTrackTitle: document.getElementById("footerTrackTitle"),
   footerTrackArtist: document.getElementById("footerTrackArtist"),
   miniVisualizer: document.getElementById("miniVisualizer"),
@@ -1563,7 +1563,6 @@ function renderDetail() {
   if (!song) {
     el.emptyDetail.classList.remove("hidden");
     el.detailContent.classList.add("hidden");
-    el.detailInstrumentsBadges.innerHTML = "";
     if (el.visualizerLegend) el.visualizerLegend.innerHTML = "";
     if (el.footerTrackTitle) el.footerTrackTitle.textContent = "Nessun brano";
     if (el.footerTrackArtist) el.footerTrackArtist.textContent = "-";
@@ -1597,14 +1596,6 @@ function renderDetail() {
     `<li><strong>Path JSON:</strong> ${escapeHtml(song.jsonPath || "-")}</li>`,
     `<li><strong>Path MIDI:</strong> ${escapeHtml(song.midiPath || "-")}</li>`,
   ].join("");
-  el.detailInstrumentsBadges.innerHTML = instruments.length
-    ? instruments
-        .map((name) => {
-          const active = activeSet.has(name) ? " active" : " inactive";
-          return `<button class="instrument-badge${active}" data-instrument-toggle="${escapeHtml(name)}" type="button" title="Attiva/disattiva strumento">${escapeHtml(name)}</button>`;
-        })
-        .join("")
-    : '<span class="instrument-badge muted">Nessuno strumento rilevato</span>';
   renderVisualizerLegend(song.id);
 
   el.editTitle.value = song.title || "";
@@ -2880,7 +2871,8 @@ function renderVisualizerLegend(songId) {
     el.visualizerLegend.innerHTML = "";
     return;
   }
-  const instruments = instrumentsForSong(song);
+  const loadedInstruments = state.player.loadedSongId === song.id ? state.player.availableInstruments : [];
+  const instruments = loadedInstruments.length ? loadedInstruments : instrumentsForSong(song);
   if (instruments.length === 0) {
     el.visualizerLegend.innerHTML = '<span class="mini-note">Nessuna traccia strumento disponibile</span>';
     return;
@@ -2890,10 +2882,10 @@ function renderVisualizerLegend(songId) {
     .map((name) => {
       const on = active.has(name);
       const swatch = colorFromInstrument(name, false);
-      return `<span class="viz-legend-item${on ? " active" : ""}">
+      return `<button class="viz-legend-item${on ? " active" : " inactive"}" data-instrument-toggle="${escapeHtml(name)}" type="button" aria-pressed="${on}" title="${on ? "Disattiva" : "Attiva"} ${escapeHtml(name)}">
         <i style="background:${escapeHtml(swatch)}"></i>
         <span>${escapeHtml(name)}</span>
-      </span>`;
+      </button>`;
     })
     .join("");
 }
@@ -2942,6 +2934,7 @@ async function loadSelectedSongForPlayer(forceReload = false) {
   state.player.loadedSongJsonPath = song.jsonPath || "";
   state.player.availableInstruments = availableInstruments;
   state.player.activeInstrumentsBySong[song.id] = activeInstruments;
+  renderVisualizerLegend(song.id);
   return notes.length > 0;
 }
 
@@ -3750,23 +3743,27 @@ function bindEvents() {
     }
   });
 
-  el.detailInstrumentsBadges.addEventListener("click", (event) => {
+  el.visualizerLegend.addEventListener("click", async (event) => {
     const btn = event.target.closest("[data-instrument-toggle]");
     if (!btn) return;
     const song = getSongById(state.selectedSongId);
     if (!song) return;
     const instrument = String(btn.dataset.instrumentToggle || "").trim();
     if (!instrument) return;
-    const all = instrumentsForSong(song);
+    const loaded = state.player.loadedSongId === song.id ? state.player.availableInstruments : [];
+    const all = loaded.length ? loaded : instrumentsForSong(song);
     const active = new Set(state.player.activeInstrumentsBySong[song.id] || all);
     if (active.has(instrument)) active.delete(instrument);
     else active.add(instrument);
     state.player.activeInstrumentsBySong[song.id] = all.filter((name) => active.has(name));
     pausePlayer();
-    state.player.loadedSongId = "";
-    state.player.notes = [];
-    state.player.duration = 0;
+    try {
+      await loadSelectedSongForPlayer(true);
+    } catch (error) {
+      toast(error.message, "error");
+    }
     render();
+    drawVisualizerFrame();
     const on = active.has(instrument);
     toast(`${instrument}: ${on ? "attivato" : "disattivato"}`, "ok");
   });
@@ -3929,6 +3926,7 @@ function bindEvents() {
   el.deleteSongBtn.addEventListener("click", deleteSongSelected);
   el.toggleFavoriteBtn.addEventListener("click", toggleFavoriteSelected);
   el.exportFilteredJsonBtn.addEventListener("click", exportFilteredSongJson);
+  el.exportVisualizerSelectionBtn.addEventListener("click", exportFilteredSongJson);
   el.addToPlaylistBtn.addEventListener("click", addSelectedToPlaylist);
 
   el.renamePlaylistBtn.addEventListener("click", managePlaylist);

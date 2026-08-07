@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.11] - 2026-08-07
+### Changed
+- Controlli strumento compatti e cliccabili direttamente sotto il visualizer.
+- Riproduzione, grafico ed export JSON filtrato condividono la stessa selezione di strumenti.
+
 ## [1.0.10] - 2026-08-06
 ### Added
 - Import ricorsivo di cartelle JSON con le policy di deduplicazione e conflitto esistenti.

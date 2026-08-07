@@ -26,7 +26,7 @@ test("ui critical controls exist for key workflows", async () => {
     "questStatusBtn",
     "questPullBtn",
     "questPushBtn",
-    "detailInstrumentsBadges",
+    "exportVisualizerSelectionBtn",
     "downloadImportReportBtn",
     "archiveConflictPolicySelect",
     "archiveDedupPolicySelect",
