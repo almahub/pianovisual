@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.12] - 2026-08-07
+### Changed
+- Schermata Importa MIDI riorganizzata per distinguere conversione MIDI, import JSON, URL e opzioni avanzate.
+- Home ridisegnata con riepilogo libreria, azioni rapide e ultimi brani importati.
+- Migliorata la leggibilità dei nuovi pannelli nei temi chiaro e scuro e nelle finestre strette.
+
 ## [1.0.11] - 2026-08-07
 ### Changed
 - Controlli strumento compatti e cliccabili direttamente sotto il visualizer.

@@ -153,22 +153,65 @@
               </div>
 
               <section id="importPanel" class="import-panel hidden" aria-label="Importa MIDI">
-                <h3>Import MIDI batch</h3>
-                <p class="panel-subtitle">Conversione JSON automatica, enrichment metadata e salvataggio su disco.</p>
+                <div class="import-page-head">
+                  <div>
+                    <p class="section-kicker">Aggiungi brani</p>
+                    <h3>Da dove vuoi importare?</h3>
+                    <p class="panel-subtitle">Scegli una sola sorgente. MIDI converte i file; JSON aggiunge brani già pronti.</p>
+                  </div>
+                </div>
 
-                <div class="import-grid">
-                  <label>
-                    URL sorgente (pagina o file .mid)
-                    <input id="remoteUrlInput" type="url" placeholder="https://example.com/... oppure link diretto .mid" />
-                  </label>
-                  <label>
-                    Azione URL
-                    <button id="resolveRemoteBtn" class="btn subtle" type="button">Analizza URL</button>
-                  </label>
-                  <label>
-                    File MIDI multipli
-                    <input id="midiFileInput" type="file" multiple accept=".mid,.midi,audio/midi,audio/x-midi" />
-                  </label>
+                <div class="import-source-grid">
+                  <section class="import-source-card midi-source">
+                    <div class="import-card-head">
+                      <span class="import-card-icon" aria-hidden="true">♪</span>
+                      <div>
+                        <h4>File MIDI</h4>
+                        <p>Seleziona uno o più <strong>.mid</strong>: PianoVisual li converte in JSON e mostra l’anteprima.</p>
+                      </div>
+                    </div>
+                    <label class="file-picker-label">
+                      Scegli i file MIDI dal computer
+                      <input id="midiFileInput" type="file" multiple accept=".mid,.midi,audio/midi,audio/x-midi" />
+                    </label>
+                    <div class="import-primary-actions">
+                      <button id="convertBtn" class="btn" type="button">1. Converti e controlla</button>
+                      <button id="saveBatchBtn" class="btn" type="button" disabled>2. Importa nella libreria</button>
+                    </div>
+                  </section>
+
+                  <section class="import-source-card json-source">
+                    <div class="import-card-head">
+                      <span class="import-card-icon" aria-hidden="true">{ }</span>
+                      <div>
+                        <h4>File JSON già convertiti</h4>
+                        <p>Aggiunge direttamente JSON compatibili. Puoi scegliere singoli file, uno ZIP o un’intera cartella.</p>
+                      </div>
+                    </div>
+                    <div class="json-import-choices">
+                      <button id="importJsonBtn" class="btn json-action" type="button">
+                        <span>File o archivio</span><small>Uno o più .json, oppure .zip</small>
+                      </button>
+                      <button id="importJsonFolderPanelBtn" class="btn json-action" type="button">
+                        <span>Cartella completa</span><small>Importa tutti i .json contenuti</small>
+                      </button>
+                    </div>
+                  </section>
+                </div>
+
+                <details class="import-option-block">
+                  <summary>Importa MIDI da un indirizzo web</summary>
+                  <p class="option-help">Inserisci il collegamento diretto a un file .mid oppure a una pagina che lo contiene.</p>
+                  <div class="url-import-row">
+                    <input id="remoteUrlInput" type="url" aria-label="URL sorgente MIDI" placeholder="https://example.com/brano.mid" />
+                    <button id="resolveRemoteBtn" class="btn subtle" type="button">Analizza indirizzo</button>
+                  </div>
+                </details>
+
+                <details class="import-option-block">
+                  <summary>Metadati da applicare ai MIDI</summary>
+                  <p class="option-help">Facoltativi. Se importi più MIDI, questi valori vengono usati come predefiniti per tutti.</p>
+                  <div class="import-grid">
                   <label>
                     Titolo override (solo 1 file)
                     <input id="metaTitle" type="text" placeholder="Titolo brano" />
@@ -209,50 +252,52 @@
                     Playlist default (nome)
                     <input id="metaPlaylist" type="text" placeholder="Es. Studio Chopin" />
                   </label>
-                </div>
+                  </div>
+                </details>
 
-                <div class="import-actions">
-                  <button id="convertBtn" class="btn" type="button">Converti anteprima</button>
-                  <button id="saveBatchBtn" class="btn" type="button" disabled>Importa e salva batch</button>
-                  <button id="importJsonBtn" class="btn subtle" type="button">Importa JSON brani</button>
-                  <button id="importJsonFolderPanelBtn" class="btn subtle" type="button">Importa cartella JSON</button>
+                <details class="import-option-block">
+                  <summary>Gestione duplicati e conflitti</summary>
+                  <p class="option-help">Le prime due opzioni valgono per i MIDI; le ultime due per file, ZIP e cartelle JSON.</p>
+                  <div class="import-grid">
+                    <label>
+                      MIDI già presenti in libreria
+                      <select id="duplicatePolicySelect">
+                        <option value="ask">Chiedi prima (modal)</option>
+                        <option value="per_file">Decidi per file (modal)</option>
+                        <option value="overwrite_all">Sovrascrivi tutti</option>
+                        <option value="skip_all">Salta tutti</option>
+                      </select>
+                    </label>
+                    <label>
+                      MIDI duplicati nella selezione
+                      <select id="batchDedupSelect">
+                        <option value="keep_first">Tieni primo</option>
+                        <option value="keep_last">Tieni ultimo</option>
+                      </select>
+                    </label>
+                    <label>
+                      JSON già presenti in libreria
+                      <select id="archiveConflictPolicySelect">
+                        <option value="skip">Salta duplicati</option>
+                        <option value="overwrite">Sovrascrivi duplicati</option>
+                      </select>
+                    </label>
+                    <label>
+                      JSON duplicati nell’importazione
+                      <select id="archiveDedupPolicySelect">
+                        <option value="keep_first">Tieni primo</option>
+                        <option value="keep_last">Tieni ultimo</option>
+                      </select>
+                    </label>
+                  </div>
+                </details>
+
+                <div class="import-secondary-actions">
                   <button id="cancelImportBtn" class="btn subtle danger hidden" type="button">Annulla import</button>
                   <button id="downloadBtn" class="btn subtle" type="button" disabled>Scarica anteprima JSON</button>
                   <button id="downloadImportReportBtn" class="btn subtle" type="button" disabled>Scarica report import</button>
                 </div>
                 <input id="importJsonFileInput" type="file" accept=".zip,.json" multiple class="hidden" />
-                <div class="import-grid">
-                  <label>
-                    Duplicati in libreria
-                    <select id="duplicatePolicySelect">
-                      <option value="ask">Chiedi prima (modal)</option>
-                      <option value="per_file">Decidi per file (modal)</option>
-                      <option value="overwrite_all">Sovrascrivi tutti</option>
-                      <option value="skip_all">Salta tutti</option>
-                    </select>
-                  </label>
-                  <label>
-                    Duplicati nel batch
-                    <select id="batchDedupSelect">
-                      <option value="keep_first">Tieni primo</option>
-                      <option value="keep_last">Tieni ultimo</option>
-                    </select>
-                  </label>
-                  <label>
-                    Conflitti import JSON archivio
-                    <select id="archiveConflictPolicySelect">
-                      <option value="skip">Salta duplicati</option>
-                      <option value="overwrite">Sovrascrivi duplicati</option>
-                    </select>
-                  </label>
-                  <label>
-                    Duplicati interni archivio
-                    <select id="archiveDedupPolicySelect">
-                      <option value="keep_first">Tieni primo</option>
-                      <option value="keep_last">Tieni ultimo</option>
-                    </select>
-                  </label>
-                </div>
                 <div id="batchProgressWrap" class="batch-progress hidden" aria-live="polite">
                   <div class="batch-progress-head">
                     <span id="batchProgressLabel">In attesa</span>

@@ -1377,18 +1377,59 @@ function renderTable() {
 function renderDirectoryPanel() {
   const songs = state.db?.songs || [];
   const manual = (state.db?.collections || []).filter((c) => c.type === "playlist" && !c.smartRule);
+  el.playlistsCards.classList.toggle("home-dashboard", state.view === "home");
 
   if (state.view === "home") {
     const recentCount = songs
       .filter((s) => Date.now() - new Date(s.importedAt).getTime() <= 30 * 24 * 60 * 60 * 1000)
       .length;
     const toStudyCount = (state.db?.practiceMeta || []).filter((p) => p.studyStatus === "to_study").length;
-    el.playlistsSectionTitle.textContent = "Panoramica";
+    const favoriteCount = songs.filter((s) => isFavorite(s.id)).length;
+    const artistCount = new Set(songs.map((s) => normalizeText(s.artist)).filter(Boolean)).size;
+    const latestSongs = [...songs]
+      .sort((a, b) => new Date(b.importedAt).getTime() - new Date(a.importedAt).getTime())
+      .slice(0, 5);
+    const latestMarkup = latestSongs.length
+      ? latestSongs
+          .map((song) => `
+            <li>
+              <span class="home-recent-marker" aria-hidden="true">♪</span>
+              <span><strong>${escapeHtml(song.title || "Senza titolo")}</strong><small>${escapeHtml(song.artist || song.composer || "Artista non indicato")}</small></span>
+              <time>${new Date(song.importedAt).toLocaleDateString("it-IT", { day: "2-digit", month: "short" })}</time>
+            </li>`)
+          .join("")
+      : '<li class="home-recent-empty">La libreria è vuota. Importa il primo brano per iniziare.</li>';
+    el.playlistsSectionTitle.textContent = "Il tuo studio";
     el.playlistsCards.innerHTML = `
-      <article class="smart-card"><strong>Importa nuovi MIDI</strong><p>Apri la sezione import per convertire in JSON.</p><button class="chip" data-nav-target="import">Vai a Importa MIDI</button></article>
-      <article class="smart-card"><strong>Preferiti</strong><p>${songs.filter((s) => isFavorite(s.id)).length} brani</p><button class="chip" data-nav-target="favorites">Apri Preferiti</button></article>
-      <article class="smart-card"><strong>Playlist</strong><p>${manual.length} playlist create</p><button class="chip" data-nav-target="playlists">Apri Playlist</button></article>
-      <article class="smart-card"><strong>Recenti / Da studiare</strong><p>${recentCount} recenti · ${toStudyCount} da studiare</p></article>
+      <article class="home-welcome-card">
+        <div>
+          <span class="home-eyebrow">PianoVisual</span>
+          <strong>${songs.length ? "Bentornato nella tua libreria" : "Inizia la tua libreria musicale"}</strong>
+          <p>${songs.length ? `Hai ${songs.length} brani disponibili. Scegli dove continuare.` : "Importa un MIDI o cerca un brano nel catalogo remoto."}</p>
+        </div>
+        <button class="btn" data-nav-target="library">Apri la libreria</button>
+      </article>
+
+      <div class="home-stats" aria-label="Riepilogo libreria">
+        <article class="home-stat-card"><span>Brani</span><strong>${songs.length}</strong><small>totali in libreria</small></article>
+        <article class="home-stat-card"><span>Artisti</span><strong>${artistCount}</strong><small>catalogati</small></article>
+        <article class="home-stat-card"><span>Preferiti</span><strong>${favoriteCount}</strong><small>brani salvati</small></article>
+        <article class="home-stat-card"><span>Da studiare</span><strong>${toStudyCount}</strong><small>${recentCount} aggiunti di recente</small></article>
+      </div>
+
+      <section class="home-quick-section">
+        <h4>Azioni rapide</h4>
+        <div class="home-quick-actions">
+          <button class="home-action-card import-action" data-nav-target="import"><span>＋</span><strong>Importa brani</strong><small>MIDI, JSON o cartella</small></button>
+          <button class="home-action-card remote-action" data-nav-target="remote"><span>⌕</span><strong>Catalogo remoto</strong><small>Cerca artista o titolo</small></button>
+          <button class="home-action-card playlist-action" data-nav-target="playlists"><span>≡</span><strong>Le tue playlist</strong><small>${manual.length} playlist create</small></button>
+        </div>
+      </section>
+
+      <section class="home-recent-section">
+        <div class="home-section-head"><h4>Ultimi brani importati</h4><button class="chip" data-nav-target="library">Vedi tutti</button></div>
+        <ul class="home-recent-list">${latestMarkup}</ul>
+      </section>
     `;
     return;
   }
