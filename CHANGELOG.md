@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.17] - 2026-08-24
+### Fixed
+- Il contatore dell’export usa gli strumenti realmente caricati dal JSON invece dei soli metadati della libreria.
+- Attivare o disattivare uno strumento ricostruisce immediatamente l’audio e riprende dalla posizione corrente.
+- Le note già programmate dello strumento disattivato vengono interrotte e non restano udibili.
+
 ## [1.0.16] - 2026-08-24
 ### Fixed
 - L’export dal Visualizer filtra coerentemente `supportingTracks`, tracce originali, strumenti, canali e durata.

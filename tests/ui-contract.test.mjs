@@ -57,3 +57,10 @@ test("visualizer export rebuilds PianoVision tracks from selected instruments", 
   assert.equal(app.includes("clone.song_length = Math.max(0, filteredDuration)"), true);
   assert.equal(app.includes("filteredByInstruments"), true);
 });
+
+test("instrument toggles update the loaded count and scheduled audio", async () => {
+  const app = await fs.readFile(path.join(root, "app.js"), "utf8");
+  assert.equal(app.includes("loadedInstruments.length ? loadedInstruments : instrumentsForSong(song)"), true);
+  assert.equal(app.includes("stopScheduledAudio();"), true);
+  assert.equal(app.includes("if (wasPlaying && hasPlayableNotes) await playPlayer(resumeAt)"), true);
+});

@@ -1618,7 +1618,8 @@ function renderDetail() {
   const tags = tagsForSong(song.id);
   const collections = collectionsForSong(song.id);
   const playlists = collections.filter((c) => c.type === "playlist" && !c.smartRule).map((c) => c.name);
-  const instruments = instrumentsForSong(song);
+  const loadedInstruments = state.player.loadedSongId === song.id ? state.player.availableInstruments : [];
+  const instruments = loadedInstruments.length ? loadedInstruments : instrumentsForSong(song);
   const activeSet = new Set(state.player.activeInstrumentsBySong[song.id] || instruments);
   const activeCount = instruments.filter((name) => activeSet.has(name)).length;
 
@@ -3139,7 +3140,7 @@ function clearPlayerPart() {
   }
 }
 
-async function playPlayer() {
+async function playPlayer(startAt = 0) {
   try {
     const hasSong = await loadSelectedSongForPlayer();
     if (!hasSong) {
@@ -3161,7 +3162,8 @@ async function playPlayer() {
     }, state.player.notes.map((n) => [n.time / speed, n]));
 
     state.player.part.start(0);
-    Tone.Transport.seconds = 0;
+    const requestedStart = Number.isFinite(startAt) ? Number(startAt) : 0;
+    Tone.Transport.seconds = Math.max(0, Math.min(requestedStart, state.player.duration));
     Tone.Transport.start("+0.02");
     state.player.isPlaying = true;
     if (el.playBtn) el.playBtn.textContent = "⏸";
@@ -3180,6 +3182,14 @@ function pausePlayer() {
   if (el.playBtn) el.playBtn.classList.remove("primary");
   cancelAnimationFrame(state.player.raf);
   drawVisualizerFrame();
+}
+
+function stopScheduledAudio() {
+  clearPlayerPart();
+  Tone.Transport.cancel(0);
+  if (state.player.synth && typeof state.player.synth.releaseAll === "function") {
+    state.player.synth.releaseAll();
+  }
 }
 
 async function savePlaybackState() {
@@ -3843,17 +3853,22 @@ function bindEvents() {
     const loaded = state.player.loadedSongId === song.id ? state.player.availableInstruments : [];
     const all = loaded.length ? loaded : instrumentsForSong(song);
     const active = new Set(state.player.activeInstrumentsBySong[song.id] || all);
+    const wasPlaying = state.player.isPlaying;
+    const resumeAt = Number(Tone.Transport.seconds || 0);
     if (active.has(instrument)) active.delete(instrument);
     else active.add(instrument);
     state.player.activeInstrumentsBySong[song.id] = all.filter((name) => active.has(name));
     pausePlayer();
+    stopScheduledAudio();
+    let hasPlayableNotes = false;
     try {
-      await loadSelectedSongForPlayer(true);
+      hasPlayableNotes = await loadSelectedSongForPlayer(true);
     } catch (error) {
       toast(error.message, "error");
     }
     render();
-    drawVisualizerFrame();
+    if (wasPlaying && hasPlayableNotes) await playPlayer(resumeAt);
+    else drawVisualizerFrame();
     const on = active.has(instrument);
     toast(`${instrument}: ${on ? "attivato" : "disattivato"}`, "ok");
   });
