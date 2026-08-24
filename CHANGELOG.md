@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.13] - 2026-08-24
+### Fixed
+- La colonna laterale ora scorre verticalmente e rende raggiungibili Tema e tutte le sezioni sotto Quest 3 anche su schermi bassi.
+
 ## [1.0.12] - 2026-08-07
 ### Changed
 - Schermata Importa MIDI riorganizzata per distinguere conversione MIDI, import JSON, URL e opzioni avanzate.

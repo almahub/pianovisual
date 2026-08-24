@@ -1,6 +1,6 @@
 {
   "name": "pianovisual",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "private": false,
   "type": "module",
   "main": "electron/main.cjs",
