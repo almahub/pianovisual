@@ -37,9 +37,16 @@ test("ui critical controls exist for key workflows", async () => {
   }
 });
 
-test("desktop bridge exposes folder import and safe Quest sync actions", async () => {
+test("desktop bridge exposes safe export, folder import and Quest sync actions", async () => {
   const preload = await fs.readFile(path.join(root, "electron", "preload.cjs"), "utf8");
-  for (const method of ["selectJsonFolder", "questStatus", "questPullJson", "questPreviewPush", "questPushJson"]) {
+  for (const method of ["saveJsonExport", "selectJsonFolder", "questStatus", "questPullJson", "questPreviewPush", "questPushJson"]) {
     assert.equal(preload.includes(`${method}:`), true, `missing desktop bridge method ${method}`);
   }
+});
+
+test("desktop JSON export refuses to write inside the live library JSON folder", async () => {
+  const main = await fs.readFile(path.join(root, "electron", "main.cjs"), "utf8");
+  assert.equal(main.includes('ipcMain.handle("library:save-json-export"'), true);
+  assert.equal(main.includes('path.relative(libraryJsonDir, targetPath)'), true);
+  assert.equal(main.includes('diversa dalla cartella library\\\\json'), true);
 });

@@ -3389,8 +3389,19 @@ async function exportBackup() {
       folder.file(file.fileName, file.content);
     }
     const blob = await zip.generateAsync({ type: "blob" });
-    downloadBlob(blob, `pianovisual-json-${Date.now()}.zip`);
-    toast(`Export completato (${files.length} file)`, "ok");
+    const fileName = `pianovisual-json-${Date.now()}.zip`;
+    if (window.pianovisualDesktop?.saveJsonExport) {
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const result = await window.pianovisualDesktop.saveJsonExport(bytes, fileName);
+      if (result?.canceled) {
+        toast("Esportazione annullata");
+        return;
+      }
+      toast(`Export completato (${files.length} file) · ${result.filePath}`, "ok");
+    } else {
+      downloadBlob(blob, fileName);
+      toast(`Export completato (${files.length} file)`, "ok");
+    }
   } catch (error) {
     toast(error.message, "error");
   } finally {

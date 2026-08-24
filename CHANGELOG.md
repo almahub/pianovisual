@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.14] - 2026-08-24
+### Fixed
+- L’esportazione completa crea un unico archivio ZIP tramite una finestra di salvataggio desktop.
+- Bloccato il salvataggio dell’export dentro la cartella sorgente `library/json`, evitando copie e duplicati nella libreria.
+
 ## [1.0.13] - 2026-08-24
 ### Fixed
 - La colonna laterale ora scorre verticalmente e rende raggiungibili Tema e tutte le sezioni sotto Quest 3 anche su schermi bassi.

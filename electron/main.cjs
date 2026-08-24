@@ -211,6 +211,30 @@ ipcMain.handle("library:open-folder", async () => {
   return { ok: true, path: runtimeLibraryDir() };
 });
 
+ipcMain.handle("library:save-json-export", async (_, bytes, suggestedName) => {
+  const safeName = path.basename(String(suggestedName || "pianovisual-json.zip")).replace(/[^a-zA-Z0-9._-]+/g, "-");
+  const selected = await dialog.showSaveDialog(mainWindow, {
+    title: "Esporta archivio JSON",
+    defaultPath: path.join(app.getPath("downloads"), safeName),
+    filters: [{ name: "Archivio ZIP", extensions: ["zip"] }],
+  });
+  if (selected.canceled || !selected.filePath) return { canceled: true };
+
+  const targetPath = path.resolve(selected.filePath);
+  const libraryJsonDir = path.resolve(runtimeLibraryDir(), "json");
+  const relativeToLibrary = path.relative(libraryJsonDir, targetPath);
+  if (relativeToLibrary === "" || (!relativeToLibrary.startsWith("..") && !path.isAbsolute(relativeToLibrary))) {
+    throw new Error("Scegli una destinazione diversa dalla cartella library\\json: contiene i file originali della libreria.");
+  }
+
+  const data = Buffer.from(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []));
+  if (data.length === 0) throw new Error("Archivio ZIP vuoto");
+  if (data.length > 512 * 1024 * 1024) throw new Error("Archivio ZIP troppo grande (massimo 512 MB)");
+  if (data.length < 4 || data[0] !== 0x50 || data[1] !== 0x4b) throw new Error("Contenuto ZIP non valido");
+  await fs.writeFile(targetPath, data, { flag: "w" });
+  return { canceled: false, filePath: targetPath };
+});
+
 ipcMain.handle("json:select-folder", async () => {
   const selected = await dialog.showOpenDialog(mainWindow, {
     title: "Seleziona cartella contenente JSON",
