@@ -1605,6 +1605,10 @@ function renderDetail() {
     el.emptyDetail.classList.remove("hidden");
     el.detailContent.classList.add("hidden");
     if (el.visualizerLegend) el.visualizerLegend.innerHTML = "";
+    if (el.exportVisualizerSelectionBtn) {
+      el.exportVisualizerSelectionBtn.textContent = "Esporta strumenti selezionati";
+      el.exportVisualizerSelectionBtn.disabled = true;
+    }
     if (el.footerTrackTitle) el.footerTrackTitle.textContent = "Nessun brano";
     if (el.footerTrackArtist) el.footerTrackArtist.textContent = "-";
     return;
@@ -1623,6 +1627,10 @@ function renderDetail() {
 
   el.detailTitle.textContent = song.title || "Senza titolo";
   el.detailSubtitle.textContent = `${song.artist || "Artista sconosciuto"} · ${song.composer || "Compositore n/d"}`;
+  if (el.exportVisualizerSelectionBtn) {
+    el.exportVisualizerSelectionBtn.textContent = `Esporta ${activeCount} ${activeCount === 1 ? "strumento" : "strumenti"}`;
+    el.exportVisualizerSelectionBtn.disabled = activeCount === 0;
+  }
 
   el.detailMeta.innerHTML = [
     `<li><strong>Difficolta:</strong> ${escapeHtml(song.difficulty || "-")}</li>`,
@@ -2479,7 +2487,17 @@ function filterJsonByActiveInstruments(jsonData, song, activeInstruments) {
   }
 
   if (supportingTracks.length) {
-    clone.supportingTracks = keepIdx.map((idx) => supportingTracks[idx]).filter(Boolean);
+    if (originalTracks.length) {
+      const playableOriginalTracks = originalTracks.filter((track) => (track?.notes || []).length > 0);
+      clone.supportingTracks = supportingTracks.filter((_, idx) => {
+        const instrument = repairMojibake(
+          String(playableOriginalTracks[idx]?.instrument?.name || instrumentsForSong(song)[idx] || `Track ${idx + 1}`).trim(),
+        );
+        return activeSet.has(instrument);
+      });
+    } else {
+      clone.supportingTracks = keepIdx.map((idx) => supportingTracks[idx]).filter(Boolean);
+    }
   }
   if (originalTracks.length) {
     clone.original.tracks = keepIdx.map((idx) => originalTracks[idx]).filter(Boolean);
@@ -2490,6 +2508,26 @@ function filterJsonByActiveInstruments(jsonData, song, activeInstruments) {
   if (Array.isArray(clone.accompanyingChannels)) {
     clone.accompanyingChannels = keepIdx.map((idx) => clone.accompanyingChannels[idx]).filter((v) => v !== undefined);
   }
+  if (Array.isArray(clone.instruments)) {
+    clone.instruments = keepIdx.map((idx) => clone.instruments[idx]).filter((v) => v !== undefined);
+  }
+
+  if (originalTracks.length && Array.isArray(clone.measures)) {
+    clone.tracksV2 = buildTracksV2(clone.original.tracks, clone.measures, Number(clone.resolution || 480));
+  } else if (clone.tracksV2 && typeof clone.tracksV2 === "object") {
+    clone.tracksV2 = { right: [], left: [] };
+  }
+
+  const keptTracks = clone?.original?.tracks?.length ? clone.original.tracks : clone.supportingTracks || [];
+  const filteredDuration = keptTracks.reduce(
+    (maxEnd, track) =>
+      Math.max(
+        maxEnd,
+        ...(track?.notes || []).map((note) => Number(note.time || 0) + Number(note.duration || 0)),
+      ),
+    0,
+  );
+  clone.song_length = Math.max(0, filteredDuration);
   clone.filteredByInstruments = [...activeSet];
   clone.filteredAt = new Date().toISOString();
 

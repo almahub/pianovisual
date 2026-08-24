@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.16] - 2026-08-24
+### Fixed
+- L’export dal Visualizer filtra coerentemente `supportingTracks`, tracce originali, strumenti, canali e durata.
+- `tracksV2` viene rigenerato usando soltanto gli strumenti selezionati, evitando note residue in PianoVision.
+- Il pulsante di export mostra il numero di strumenti che verranno inclusi.
+
 ## [1.0.15] - 2026-08-24
 ### Fixed
 - Il ritorno di un JSON dal Quest o da una cartella riconosce il contenuto già presente anche quando manca l’artista.

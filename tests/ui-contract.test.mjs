@@ -50,3 +50,10 @@ test("desktop JSON export refuses to write inside the live library JSON folder",
   assert.equal(main.includes('path.relative(libraryJsonDir, targetPath)'), true);
   assert.equal(main.includes('diversa dalla cartella library\\\\json'), true);
 });
+
+test("visualizer export rebuilds PianoVision tracks from selected instruments", async () => {
+  const app = await fs.readFile(path.join(root, "app.js"), "utf8");
+  assert.equal(app.includes("clone.tracksV2 = buildTracksV2(clone.original.tracks"), true);
+  assert.equal(app.includes("clone.song_length = Math.max(0, filteredDuration)"), true);
+  assert.equal(app.includes("filteredByInstruments"), true);
+});
