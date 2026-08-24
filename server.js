@@ -376,6 +376,36 @@ function findDuplicateSong(db, { hash, title, artist }) {
   };
 }
 
+function hashJsonData(jsonData) {
+  return hashBuffer(Buffer.from(JSON.stringify(jsonData), "utf8"));
+}
+
+async function findDuplicateJsonSong(db, { hash, title, artist, fileName }) {
+  const direct =
+    db.songs.find((song) => song.jsonContentHash === hash) ||
+    db.songs.find((song) => song.fileHash === hash) ||
+    findDuplicateSong(db, { hash: "", title, artist }).duplicate;
+  if (direct) return direct;
+
+  const incomingBase = normalizeText(path.basename(String(fileName || ""), path.extname(String(fileName || ""))));
+  for (const song of db.songs) {
+    const storedName = path.basename(String(song.jsonPath || ""));
+    if (!storedName) continue;
+    const storedBase = normalizeText(path.basename(storedName, path.extname(storedName)));
+    const sourceBase = normalizeText(path.basename(String(song.sourceFileName || ""), path.extname(String(song.sourceFileName || ""))));
+    if (incomingBase && (incomingBase === storedBase || incomingBase === sourceBase)) return song;
+    try {
+      const storedJson = JSON.parse(await fs.readFile(path.join(JSON_DIR, storedName), "utf8"));
+      const storedHash = hashJsonData(storedJson);
+      song.jsonContentHash = storedHash;
+      if (storedHash === hash) return song;
+    } catch {
+      // Il file mancante o non leggibile non deve bloccare l'import degli altri brani.
+    }
+  }
+  return null;
+}
+
 function dedupeIncomingItems(items, mode = "keep_first", keyFn = (item) => [String(item?.sourceFileName || "").toLowerCase()]) {
   const kept = [];
   const dropped = [];
@@ -863,14 +893,10 @@ async function handleApi(req, res, url) {
         continue;
       }
 
-      const jsonText = JSON.stringify(jsonData, null, 2);
-      const hash = hashBuffer(Buffer.from(jsonText, "utf8"));
+      const hash = hashJsonData(jsonData);
       const meta = inferSongMetadataFromJson(jsonData, safeFile);
-      const { duplicate, reason: duplicateReason } = findDuplicateSong(db, {
-        hash,
-        title: meta.title,
-        artist: meta.artist,
-      });
+      const duplicate = await findDuplicateJsonSong(db, { hash, title: meta.title, artist: meta.artist, fileName: safeFile });
+      const duplicateReason = duplicate ? "contenuto, nome file o metadati già presenti" : "";
 
       try {
         if (duplicate && conflictPolicy !== "overwrite") {
@@ -903,7 +929,8 @@ async function handleApi(req, res, url) {
           duplicate.duration = Number(meta.duration || duplicate.duration || 0);
           duplicate.instruments = Array.isArray(meta.instruments) ? meta.instruments : duplicate.instruments || [];
           duplicate.updatedAt = nowIso();
-          duplicate.fileHash = hash;
+          if (!duplicate.fileHash) duplicate.fileHash = hash;
+          duplicate.jsonContentHash = hash;
           duplicate.sourceFileName = safeFile;
           duplicate.jsonPath = `/${path.relative(__dirname, targetJsonAbs).replace(/\\/g, "/")}`;
           duplicate.midiPath = "";
@@ -940,6 +967,7 @@ async function handleApi(req, res, url) {
           importedAt: nowIso(),
           updatedAt: nowIso(),
           fileHash: hash,
+          jsonContentHash: hash,
           sourceFileName: safeFile,
           jsonPath: `/library/json/${jsonFileName}`,
           midiPath: "",
@@ -1021,18 +1049,19 @@ async function handleApi(req, res, url) {
         continue;
       }
 
-      const hash = hashBuffer(Buffer.from(jsonText, "utf8"));
+      const hash = hashJsonData(jsonData);
       const meta = inferSongMetadataFromJson(jsonData, fileName);
       const relPath = `/library/json/${fileName}`;
 
       const existing =
+        db.songs.find((song) => song.jsonContentHash === hash) ||
         db.songs.find((song) => song.fileHash === hash) ||
         db.songs.find((song) => song.jsonPath === relPath) ||
         db.songs.find((song) => song.sourceFileName === fileName);
 
       if (existing) {
         const before = JSON.stringify(existing);
-        existing.fileHash = hash;
+        existing.jsonContentHash = hash;
         existing.sourceFileName = existing.sourceFileName || fileName;
         existing.jsonPath = existing.jsonPath || relPath;
 
@@ -1081,6 +1110,7 @@ async function handleApi(req, res, url) {
         importedAt: nowIso(),
         updatedAt: nowIso(),
         fileHash: hash,
+        jsonContentHash: hash,
         sourceFileName: fileName,
         jsonPath: relPath,
         midiPath: "",
@@ -1272,6 +1302,7 @@ async function handleApi(req, res, url) {
           targetSong.instruments = Array.isArray(songMeta.instruments) ? songMeta.instruments : targetSong.instruments || [];
           targetSong.updatedAt = nowIso();
           targetSong.fileHash = hash;
+          targetSong.jsonContentHash = hashJsonData(jsonData);
           targetSong.sourceFileName = sourceFileName;
           targetSong.jsonPath = `/${path.relative(__dirname, targetJsonAbs).replace(/\\/g, "/")}`;
           targetSong.midiPath = "";
@@ -1331,6 +1362,7 @@ async function handleApi(req, res, url) {
           importedAt: nowIso(),
           updatedAt: nowIso(),
           fileHash: hash,
+          jsonContentHash: hashJsonData(jsonData),
           sourceFileName,
           jsonPath: `/library/json/${jsonFileName}`,
           midiPath: "",

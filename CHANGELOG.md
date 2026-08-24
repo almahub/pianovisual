@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.15] - 2026-08-24
+### Fixed
+- Il ritorno di un JSON dal Quest o da una cartella riconosce il contenuto già presente anche quando manca l’artista.
+- Il riallineamento da disco conserva separatamente l’hash MIDI e l’hash JSON, evitando duplicati alle importazioni successive.
+
 ## [1.0.14] - 2026-08-24
 ### Fixed
 - L’esportazione completa crea un unico archivio ZIP tramite una finestra di salvataggio desktop.

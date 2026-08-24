@@ -233,6 +233,40 @@ test('import-json-archive skip duplicate keeps original', async () => {
   assert.equal(db.songs[0].title, 'Archive Song');
 });
 
+test('JSON roundtrip does not duplicate a MIDI song when artist is empty', async () => {
+  const midiItem = makeItem({ sourceFileName: 'roundtrip.mid', title: 'Roundtrip', artist: '', midiSeed: 'roundtrip' });
+  let result = await api('/api/library/import-batch', { method: 'POST', body: JSON.stringify({ items: [midiItem] }) });
+  assert.equal(result.importedCount, 1);
+
+  result = await api('/api/library/import-json-archive', {
+    method: 'POST',
+    body: JSON.stringify({ items: [{ fileName: 'copied-from-quest.json', jsonData: midiItem.jsonData }], conflictPolicy: 'skip' }),
+  });
+  assert.equal(result.importedCount, 0);
+  assert.equal(result.skipped.length, 1);
+
+  const db = await api('/api/library');
+  assert.equal(db.songs.length, 1);
+  assert.equal((await fs.readdir(jsonDir)).filter((name) => name.endsWith('.json')).length, 1);
+});
+
+test('disk realignment preserves MIDI hash used for duplicate detection', async () => {
+  const item = makeItem({ sourceFileName: 'realign.mid', title: 'Realign', artist: '', midiSeed: 'realign' });
+  await api('/api/library/import-batch', { method: 'POST', body: JSON.stringify({ items: [item] }) });
+  const before = await api('/api/library');
+  const midiHash = before.songs[0].fileHash;
+
+  await api('/api/library/sync-from-json', { method: 'POST', body: JSON.stringify({ mode: 'add_only' }) });
+  const afterSync = await api('/api/library');
+  assert.equal(afterSync.songs[0].fileHash, midiHash);
+  assert.equal(typeof afterSync.songs[0].jsonContentHash, 'string');
+
+  const result = await api('/api/library/import-batch', { method: 'POST', body: JSON.stringify({ items: [item] }) });
+  assert.equal(result.importedCount, 0);
+  assert.equal(result.skipped.length, 1);
+  assert.equal((await api('/api/library')).songs.length, 1);
+});
+
 test('import-json-archive overwrite duplicate updates metadata', async () => {
   const first = {
     fileName: 'arch-a.json',
