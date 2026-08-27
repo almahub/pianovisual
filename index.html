@@ -40,42 +40,46 @@
           <button class="nav-item" data-view="import">⤴ Importa MIDI</button>
         </nav>
 
-        <section class="sidebar-block">
-          <p class="block-title">Focus Studio</p>
-          <div class="study-tags">
+        <details class="sidebar-block sidebar-group" open>
+          <summary><span aria-hidden="true">◎</span> Focus Studio</summary>
+          <div class="sidebar-group-content study-tags">
             <button class="chip" data-study-filter="recent">Recenti</button>
             <button class="chip" data-study-filter="to_study">Da studiare</button>
             <button class="chip" data-study-filter="in_progress">In progress</button>
             <button class="chip" data-study-filter="mastered">Mastered</button>
           </div>
-        </section>
+        </details>
 
-        <section class="sidebar-block">
-          <p class="block-title">Backup</p>
-          <button id="backupBtn" class="chip">Esporta archivio JSON</button>
-          <button id="importArchiveBtn" class="chip">Import archivio</button>
-          <button id="importJsonFolderBtn" class="chip">Importa cartella JSON</button>
-          <button id="openLibraryFolderBtn" class="chip">Apri cartella libreria</button>
-          <button id="syncLibraryBtn" class="chip">Riallinea libreria</button>
-          <input id="archiveFileInput" type="file" accept=".zip,.json" multiple class="hidden" />
-          <input id="jsonFolderInput" type="file" accept=".json,application/json" multiple webkitdirectory class="hidden" />
-        </section>
+        <details class="sidebar-block sidebar-group">
+          <summary><span aria-hidden="true">▣</span> File e backup</summary>
+          <div class="sidebar-group-content sidebar-action-list">
+            <button id="backupBtn" class="chip">Esporta archivio JSON</button>
+            <button id="importArchiveBtn" class="chip">Import archivio</button>
+            <button id="importJsonFolderBtn" class="chip">Importa cartella JSON</button>
+            <button id="openLibraryFolderBtn" class="chip">Apri cartella libreria</button>
+            <button id="syncLibraryBtn" class="chip">Riallinea libreria</button>
+            <input id="archiveFileInput" type="file" accept=".zip,.json" multiple class="hidden" />
+            <input id="jsonFolderInput" type="file" accept=".json,application/json" multiple webkitdirectory class="hidden" />
+          </div>
+        </details>
 
-        <section class="sidebar-block">
-          <p class="block-title">Quest 3</p>
-          <button id="questStatusBtn" class="chip">Rileva Quest 3</button>
-          <button id="questPullBtn" class="chip">Importa JSON dal Quest</button>
-          <button id="questPushBtn" class="chip">Invia JSON al Quest</button>
-          <p id="questStatusText" class="mini-note">Richiede ADB e debug USB.</p>
-        </section>
+        <details class="sidebar-block sidebar-group">
+          <summary><span aria-hidden="true">◉</span> Quest 3</summary>
+          <div class="sidebar-group-content sidebar-action-list">
+            <button id="questStatusBtn" class="chip">Rileva Quest 3</button>
+            <button id="questPullBtn" class="chip">Importa JSON dal Quest</button>
+            <button id="questPushBtn" class="chip">Invia JSON al Quest</button>
+            <p id="questStatusText" class="mini-note">Richiede ADB e debug USB.</p>
+          </div>
+        </details>
 
-        <section class="sidebar-block">
-          <p class="block-title">Tema</p>
-          <div class="theme-toggle-row">
+        <details class="sidebar-block sidebar-group">
+          <summary><span aria-hidden="true">◐</span> Aspetto</summary>
+          <div class="sidebar-group-content theme-toggle-row">
             <button id="themeLightBtn" class="icon-btn theme-toggle-btn" type="button" title="Tema Giorno" aria-label="Tema Giorno">☀</button>
             <button id="themeDarkBtn" class="icon-btn theme-toggle-btn" type="button" title="Tema Notte" aria-label="Tema Notte">☾</button>
           </div>
-        </section>
+        </details>
       </aside>
 
       <div class="main-column">
@@ -142,13 +146,18 @@
                   <h2 id="viewTitle">Archivio Brani</h2>
                   <p id="playlistCount" class="mini-note"></p>
                 </div>
-                <div class="section-actions">
+                <div id="libraryToolbar" class="section-actions hidden">
                   <button id="selectVisibleBtn" class="btn subtle" type="button">Seleziona visibili</button>
-                  <button id="clearSelectionBtn" class="btn subtle" type="button">Deseleziona</button>
-                  <button id="downloadSelectedBtn" class="btn subtle" type="button">Scarica selezionati JSON</button>
                   <button id="deleteSelectedBtn" class="btn subtle danger" type="button" disabled>Elimina selezionati</button>
-                  <button id="newPlaylistBtn" class="btn subtle" type="button">Nuova Playlist</button>
-                  <button id="managePlaylistBtn" class="btn subtle" type="button">Gestisci Playlist</button>
+                  <details class="toolbar-menu">
+                    <summary class="btn subtle">Altre azioni</summary>
+                    <div class="toolbar-menu-popover">
+                      <button id="clearSelectionBtn" class="btn subtle" type="button">Deseleziona tutto</button>
+                      <button id="downloadSelectedBtn" class="btn subtle" type="button">Scarica selezionati JSON</button>
+                      <button id="newPlaylistBtn" class="btn subtle" type="button">Nuova Playlist</button>
+                      <button id="managePlaylistBtn" class="btn subtle" type="button">Gestisci Playlist e Tag</button>
+                    </div>
+                  </details>
                 </div>
               </div>
 
@@ -430,8 +439,8 @@
                   </div>
                 </details>
 
-                <details open>
-                  <summary>Edit metadata</summary>
+                <details>
+                  <summary>Modifica informazioni</summary>
                   <div class="meta-edit-form">
                     <section class="meta-edit-block">
                       <h4>Dati principali</h4>
@@ -488,16 +497,19 @@
                   </div>
                 </details>
 
-                <div class="detail-actions detail-actions-grid">
-                  <button id="exportFilteredJsonBtn" class="btn subtle" type="button">Esporta JSON filtrato</button>
-                  <button id="toggleFavoriteBtn" class="btn subtle" type="button">Toggle preferito</button>
-                  <button id="addToPlaylistBtn" class="btn subtle" type="button">Aggiungi a playlist</button>
-                  <button id="renamePlaylistBtn" class="btn subtle" type="button">Rinomina playlist</button>
-                  <button id="deletePlaylistBtn" class="btn subtle danger" type="button">Elimina playlist</button>
-                  <button id="createTagBtn" class="btn subtle" type="button">Crea tag</button>
-                  <button id="renameTagBtn" class="btn subtle" type="button">Rinomina tag</button>
-                  <button id="deleteTagBtn" class="btn subtle danger" type="button">Elimina tag</button>
-                </div>
+                <details class="detail-more-actions">
+                  <summary>Altre azioni sul brano</summary>
+                  <div class="detail-actions detail-actions-grid">
+                    <button id="exportFilteredJsonBtn" class="btn subtle" type="button">Esporta JSON filtrato</button>
+                    <button id="toggleFavoriteBtn" class="btn subtle" type="button">Aggiungi/togli preferito</button>
+                    <button id="addToPlaylistBtn" class="btn subtle" type="button">Aggiungi a playlist</button>
+                    <button id="renamePlaylistBtn" class="btn subtle" type="button">Gestisci playlist</button>
+                    <button id="deletePlaylistBtn" class="btn subtle danger" type="button">Elimina playlist</button>
+                    <button id="createTagBtn" class="btn subtle" type="button">Crea tag</button>
+                    <button id="renameTagBtn" class="btn subtle" type="button">Rinomina tag</button>
+                    <button id="deleteTagBtn" class="btn subtle danger" type="button">Elimina tag</button>
+                  </div>
+                </details>
 
                 <section id="libraryToolsPanel" class="import-panel hidden">
                   <h4>Gestione Playlist e Tag</h4>

@@ -17,6 +17,7 @@ test("ui critical controls exist for key workflows", async () => {
     "saveBatchBtn",
     "downloadSelectedBtn",
     "deleteSelectedBtn",
+    "libraryToolbar",
     "remoteCatalogPanel",
     "remoteCatalogSearch",
     "remoteConvertBtn",
@@ -35,6 +36,13 @@ test("ui critical controls exist for key workflows", async () => {
   for (const id of requiredIds) {
     assert.equal(html.includes(`id=\"${id}\"`), true, `missing #${id}`);
   }
+});
+
+test("secondary UI controls are grouped into collapsible sections", async () => {
+  const html = await fs.readFile(indexPath, "utf8");
+  assert.equal((html.match(/class="sidebar-block sidebar-group"/g) || []).length, 4);
+  assert.equal(html.includes('class="toolbar-menu"'), true);
+  assert.equal(html.includes('class="detail-more-actions"'), true);
 });
 
 test("desktop bridge exposes safe export, folder import and Quest sync actions", async () => {

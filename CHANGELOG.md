@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.18] - 2026-08-27
+### Changed
+- Barra laterale alleggerita con gruppi richiudibili per Studio, File e backup, Quest 3 e Aspetto.
+- Le azioni della Libreria sono mostrate solo nella vista Libreria e quelle secondarie sono raccolte in un menu.
+- Nel dettaglio brano restano in primo piano Visualizer e selezione strumenti; metadati e altre azioni sono richiudibili.
+- Stili coerenti nei temi chiaro e scuro per i nuovi gruppi e menu.
+
 ## [1.0.17] - 2026-08-24
 ### Fixed
 - Il contatore dell’export usa gli strumenti realmente caricati dal JSON invece dei soli metadati della libreria.

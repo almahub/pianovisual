@@ -16,6 +16,7 @@ const el = {
   viewKicker: document.getElementById("viewKicker"),
   viewTitle: document.getElementById("viewTitle"),
   playlistCount: document.getElementById("playlistCount"),
+  libraryToolbar: document.getElementById("libraryToolbar"),
   importPanel: document.getElementById("importPanel"),
   remoteCatalogPanel: document.getElementById("remoteCatalogPanel"),
   remoteCatalogSearch: document.getElementById("remoteCatalogSearch"),
@@ -1590,6 +1591,7 @@ function renderViewLabels() {
   el.playlistsSection.classList.toggle("hidden", !["home", "library", "playlists", "genres", "artists"].includes(state.view));
   el.smartPlaylistsSection.classList.toggle("hidden", state.view !== "home");
   const libraryOnly = state.view === "library";
+  el.libraryToolbar?.classList.toggle("hidden", !libraryOnly);
   el.searchWrap.classList.toggle("hidden", !libraryOnly);
   el.filterPanel.classList.toggle("hidden", !libraryOnly);
   el.detailPanel.classList.toggle("hidden", !libraryOnly);
