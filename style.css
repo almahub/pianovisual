@@ -143,6 +143,20 @@ body {
   gap: 8px;
 }
 
+.nav-group-label {
+  margin: 5px 10px 0;
+  color: #686868;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.nav-group-label.piano-label {
+  margin-top: 12px;
+  color: #b896ff;
+}
+
 .nav-item {
   border: 0;
   background: transparent;
@@ -158,6 +172,19 @@ body {
 .nav-item.active {
   color: #fff;
   background: rgba(255, 255, 255, 0.06);
+}
+
+.piano-nav-item {
+  border: 1px solid rgba(157, 112, 255, 0.22);
+  background: linear-gradient(90deg, rgba(102, 57, 177, 0.2), rgba(30, 20, 48, 0.08));
+  color: #d7c4ff;
+}
+
+.piano-nav-item:hover,
+.piano-nav-item.active {
+  border-color: #9d70ff;
+  background: linear-gradient(90deg, rgba(118, 72, 200, 0.42), rgba(46, 28, 72, 0.25));
+  color: #fff;
 }
 
 .sidebar-block {
@@ -430,6 +457,115 @@ textarea {
 
 .content-grid.single-column {
   grid-template-columns: 1fr;
+}
+
+.content-grid.piano-workspace .library-area,
+.content-grid.piano-workspace .detail-panel {
+  border-color: rgba(157, 112, 255, 0.42);
+}
+
+:root[data-workspace="piano"] .main-column {
+  background: linear-gradient(to bottom, #29203a 0%, #141219 250px);
+}
+
+.piano-lab-panel {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 14px;
+  align-items: start;
+  margin-top: 12px;
+  padding: 17px;
+  border: 1px solid rgba(174, 132, 255, 0.48);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 90% 20%, rgba(244, 190, 71, 0.13), transparent 32%),
+    linear-gradient(135deg, rgba(93, 52, 155, 0.38), rgba(25, 20, 33, 0.94));
+}
+
+.piano-lab-mark {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: linear-gradient(145deg, #a87cff, #7045bd);
+  box-shadow: 0 8px 24px rgba(111, 66, 190, 0.35);
+  color: #fff;
+  font-size: 1.45rem;
+}
+
+.piano-lab-panel h3 {
+  margin: 3px 0 5px;
+  color: #f1eaff;
+}
+
+.piano-lab-panel p:not(.section-kicker) {
+  margin: 0;
+  max-width: 800px;
+  color: #c7badc;
+  font-size: 0.83rem;
+  line-height: 1.45;
+}
+
+.piano-engine-status {
+  margin-top: 9px !important;
+  font-weight: 700;
+}
+
+.piano-engine-status.ok {
+  color: #79e2a0 !important;
+}
+
+.piano-engine-status.error {
+  color: #ff9999 !important;
+}
+
+.piano-reduction-cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 10px 0;
+  padding: 11px;
+  border: 1px solid rgba(157, 112, 255, 0.42);
+  border-radius: 11px;
+  background: linear-gradient(120deg, rgba(104, 61, 175, 0.28), rgba(30, 23, 41, 0.7));
+}
+
+.piano-reduction-cta strong,
+.piano-reduction-cta small {
+  display: block;
+}
+
+.piano-reduction-cta strong {
+  margin-top: 5px;
+  font-size: 0.84rem;
+}
+
+.piano-reduction-cta small {
+  margin-top: 3px;
+  color: #b9aec9;
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
+.piano-pill {
+  color: #cdb8ff;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.btn.piano-btn {
+  flex: 0 0 auto;
+  border-color: #a87cff;
+  background: linear-gradient(135deg, #9162e7, #7144bd);
+  color: #fff;
+}
+
+.piano-origin {
+  color: #cbb5ff;
 }
 
 .library-area,
@@ -1096,7 +1232,7 @@ tbody tr.active {
 
 .home-quick-actions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -1137,6 +1273,33 @@ tbody tr.active {
 .home-action-card.playlist-action > span {
   background: rgba(191, 120, 255, 0.15);
   color: #d1a0ff;
+}
+
+.home-action-card.piano-action {
+  border-color: rgba(157, 112, 255, 0.35);
+  background: linear-gradient(145deg, rgba(88, 52, 145, 0.32), #202020 70%);
+}
+
+.home-action-card.piano-action > span {
+  background: rgba(157, 112, 255, 0.2);
+  color: #cdb8ff;
+}
+
+.piano-row .cover {
+  background: linear-gradient(145deg, #9969eb, #6540a3);
+  color: #fff;
+}
+
+.piano-table-badge {
+  display: inline-block;
+  margin-top: 3px;
+  padding: 2px 6px;
+  border: 1px solid #7951b8;
+  border-radius: 999px;
+  color: #cdb8ff;
+  font-size: 0.61rem;
+  line-height: 1;
+  text-transform: uppercase;
 }
 
 .home-action-card strong,
@@ -1606,6 +1769,43 @@ tbody tr.active {
   background: #e8edf5;
 }
 
+:root[data-theme="light"] .nav-group-label.piano-label,
+:root[data-theme="light"] .piano-nav-item {
+  color: #6845a4;
+}
+
+:root[data-theme="light"] .piano-nav-item {
+  border-color: #d7c5f3;
+  background: linear-gradient(90deg, #f0e9fb, #faf8fd);
+}
+
+:root[data-theme="light"] .piano-nav-item:hover,
+:root[data-theme="light"] .piano-nav-item.active {
+  border-color: #9c75d4;
+  background: #e9ddf8;
+  color: #42256e;
+}
+
+:root[data-theme="light"][data-workspace="piano"] .main-column {
+  background: linear-gradient(to bottom, #eee7f8 0%, #faf8fd 250px);
+}
+
+:root[data-theme="light"] .piano-lab-panel,
+:root[data-theme="light"] .piano-reduction-cta {
+  border-color: #cdb7ea;
+  background: linear-gradient(135deg, #f1e9fb, #ffffff 70%);
+}
+
+:root[data-theme="light"] .piano-lab-panel h3,
+:root[data-theme="light"] .piano-reduction-cta strong {
+  color: #382255;
+}
+
+:root[data-theme="light"] .piano-lab-panel p:not(.section-kicker),
+:root[data-theme="light"] .piano-reduction-cta small {
+  color: #655775;
+}
+
 :root[data-theme="light"] .main-column {
   background: linear-gradient(to bottom, #e9eef7 0%, #f8fafe 220px);
 }
@@ -1689,6 +1889,11 @@ tbody tr.active {
 :root[data-theme="light"] .home-action-card:hover {
   background: #eef3f9;
   border-color: #aebdce;
+}
+
+:root[data-theme="light"] .home-action-card.piano-action {
+  border-color: #cdb7ea;
+  background: linear-gradient(145deg, #f0e7fb, #f7f9fc 70%);
 }
 
 :root[data-theme="light"] .home-recent-list li {
@@ -1877,6 +2082,15 @@ tbody tr.active {
 
   .home-welcome-card {
     align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .piano-lab-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .piano-reduction-cta {
+    align-items: stretch;
     flex-direction: column;
   }
 

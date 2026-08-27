@@ -1,6 +1,6 @@
 {
   "name": "pianovisual",
-  "version": "1.0.18",
+  "version": "1.0.19",
   "private": false,
   "type": "module",
   "main": "electron/main.cjs",
@@ -37,10 +37,12 @@
       "library/json/.gitkeep",
       "library/exports/.gitkeep",
       "electron/**/*",
+      "skill/music-to-piano-json/**/*",
       "package.json"
     ],
     "asarUnpack": [
-      "**/*.node"
+      "**/*.node",
+      "skill/music-to-piano-json/**/*"
     ],
     "win": {
       "target": [

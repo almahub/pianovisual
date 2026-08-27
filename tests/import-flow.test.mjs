@@ -84,6 +84,50 @@ function makeItem({ sourceFileName = 'piece.mid', title = 'Piece', artist = 'Tes
   };
 }
 
+function makeCompatiblePianoVisionJson() {
+  const track = (name, number, notes) => ({
+    channel: number,
+    controlChanges: {},
+    pitchBends: [],
+    instrument: { family: 'piano', number, name },
+    name,
+    notes: notes.map((note, index) => ({
+      midi: note,
+      time: index * 0.5,
+      duration: 0.45,
+      velocity: 0.8,
+      ticks: index * 240,
+      durationTicks: 216,
+      name: `N${note}`,
+    })),
+  });
+  const originalTracks = [
+    track('Lead', 0, [72, 74, 76, 77]),
+    track('Harmony', 1, [60, 64, 65, 69]),
+    track('Bass', 2, [36, 36, 41, 43]),
+  ];
+  return {
+    supportingTracks: originalTracks.map((item) => ({ notes: item.notes, myInstrument: -5, theirInstrument: item.instrument.number })),
+    start_time: 0,
+    song_length: 2,
+    resolution: 480,
+    tempos: [{ bpm: 120, ticks: 0, time: 0 }],
+    keySignatures: [{ key: 'C', scale: 'major', ticks: 0 }],
+    timeSignatures: [{ ticks: 0, timeSignature: [4, 4], measures: 0 }],
+    measures: [{ ticksStart: 0, totalTicks: 1920, time: 0, timeSignature: [4, 4] }],
+    tracksV2: {
+      right: [{ direction: 'up', notes: [], measureTicksStart: 0, measureTicksEnd: 1920 }],
+      left: [{ direction: 'down', notes: [], measureTicksStart: 0, measureTicksEnd: 1920 }],
+    },
+    original: { header: { ppq: 480, tempos: [{ bpm: 120, ticks: 0 }], timeSignatures: [] }, tracks: originalTracks },
+    accompanyingInstruments: [0, 1, 2],
+    accompanyingChannels: [0, 1, 2],
+    accompanyingTracks: [],
+    name: 'Skill Source',
+    artist: 'Tester',
+  };
+}
+
 async function waitForServer() {
   const start = Date.now();
   while (Date.now() - start < 8000) {
@@ -265,6 +309,31 @@ test('disk realignment preserves MIDI hash used for duplicate detection', async 
   assert.equal(result.importedCount, 0);
   assert.equal(result.skipped.length, 1);
   assert.equal((await api('/api/library')).songs.length, 1);
+});
+
+test('Piano Lab creates a separate compatible reduction linked to the full song', async () => {
+  const sourceJson = makeCompatiblePianoVisionJson();
+  const imported = await api('/api/library/import-json-archive', {
+    method: 'POST',
+    body: JSON.stringify({ items: [{ fileName: 'skill-source.json', jsonData: sourceJson }] }),
+  });
+  assert.equal(imported.importedCount, 1);
+  const status = await api('/api/piano-reduction/status');
+  assert.equal(status.available, true);
+
+  const result = await api('/api/piano-reduction/create', {
+    method: 'POST',
+    body: JSON.stringify({ songId: imported.songs[0].id }),
+  });
+  assert.equal(result.song.variantType, 'piano_reduction');
+  assert.equal(result.song.derivedFromSongId, imported.songs[0].id);
+  assert.equal(result.summary.measures, 1);
+
+  const db = await api('/api/library');
+  assert.equal(db.songs.length, 2);
+  const reduced = JSON.parse(await fs.readFile(path.join(jsonDir, path.basename(result.song.jsonPath)), 'utf8'));
+  assert.equal(reduced.tracksV2.right.length, reduced.measures.length);
+  assert.equal(reduced.tracksV2.left.length, reduced.measures.length);
 });
 
 test('import-json-archive overwrite duplicate updates metadata', async () => {

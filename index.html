@@ -30,14 +30,17 @@
         </div>
 
         <nav class="nav-main" aria-label="Sezioni principali">
+          <p class="nav-group-label">Libreria musicale</p>
           <button class="nav-item active" data-view="home">🏠 Home</button>
           <button class="nav-item" data-view="artists">🎤 Artisti</button>
           <button class="nav-item" data-view="genres">🏷 Generi</button>
           <button class="nav-item" data-view="favorites">❤️ Preferiti</button>
           <button class="nav-item" data-view="playlists">📚 Playlist</button>
-          <button class="nav-item" data-view="library">🔍 Libreria</button>
+          <button class="nav-item" data-view="library">🔍 Brani completi</button>
           <button class="nav-item" data-view="remote">🌐 Catalogo remoto</button>
           <button class="nav-item" data-view="import">⤴ Importa MIDI</button>
+          <p class="nav-group-label piano-label">Piano Lab</p>
+          <button class="nav-item piano-nav-item" data-view="reductions">♬ Riduzioni pianistiche</button>
         </nav>
 
         <details class="sidebar-block sidebar-group" open>
@@ -160,6 +163,16 @@
                   </details>
                 </div>
               </div>
+
+              <section id="pianoLabPanel" class="piano-lab-panel hidden" aria-label="Piano Lab">
+                <div class="piano-lab-mark" aria-hidden="true">♬</div>
+                <div>
+                  <p class="section-kicker">Spazio separato</p>
+                  <h3>Piano Lab · Riduzioni pianistiche</h3>
+                  <p>Qui trovi soltanto le versioni per pianoforte create da melodia, armonia e basso. I brani completi originali non vengono modificati.</p>
+                  <p id="pianoEngineStatus" class="piano-engine-status">Verifica del motore di riduzione…</p>
+                </div>
+              </section>
 
               <section id="importPanel" class="import-panel hidden" aria-label="Importa MIDI">
                 <div class="import-page-head">
@@ -438,6 +451,15 @@
                     <button id="exportVisualizerSelectionBtn" class="btn subtle viz-export-btn" type="button">Esporta strumenti selezionati</button>
                   </div>
                 </details>
+
+                <section id="pianoReductionCta" class="piano-reduction-cta">
+                  <div>
+                    <span class="piano-pill">Piano Lab</span>
+                    <strong>Crea una versione per pianoforte</strong>
+                    <small>Analizza melodia, armonia e basso senza modificare il brano completo.</small>
+                  </div>
+                  <button id="createPianoReductionBtn" class="btn piano-btn" type="button">Crea riduzione</button>
+                </section>
 
                 <details>
                   <summary>Modifica informazioni</summary>

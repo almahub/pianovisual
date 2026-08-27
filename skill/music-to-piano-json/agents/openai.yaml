@@ -1,0 +1,4 @@
+interface:
+  display_name: "Music to Piano JSON"
+  short_description: "Riduzione pianistica strutturata da MIDI e MusicXML"
+  default_prompt: "Use $music-to-piano-json to transform this musical source into a normalized piano-reduction JSON."

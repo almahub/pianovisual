@@ -1,6 +1,9 @@
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,8 +20,10 @@ const EXPORTS_DIR = path.join(LIBRARY_DIR, "exports");
 const DB_PATH = path.join(LIBRARY_DIR, "db.json");
 const PACKAGE_JSON_PATH = path.join(__dirname, "package.json");
 const REMOTE_CATALOG_ORIGIN = "https://ftp.karapertutti.altervista.org";
+const execFileAsync = promisify(execFile);
 
 let cachedAppVersion = "";
+let cachedPythonRuntime = null;
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -158,6 +163,78 @@ async function writeJsonAtomic(absPath, jsonData) {
   const tmpPath = `${absPath}.tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   await fs.writeFile(tmpPath, `${JSON.stringify(jsonData, null, 2)}\n`, "utf8");
   await fs.rename(tmpPath, absPath);
+}
+
+async function pianoReductionScriptPath() {
+  const candidates = [
+    path.join(__dirname, "skill", "music-to-piano-json", "scripts", "convert.py"),
+    process.resourcesPath
+      ? path.join(process.resourcesPath, "app.asar.unpacked", "skill", "music-to-piano-json", "scripts", "convert.py")
+      : "",
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    if (await pathExists(candidate)) return candidate;
+  }
+  throw new Error("Motore music-to-piano-json non incluso nell'applicazione");
+}
+
+async function standalonePianoEnginePath() {
+  const executable = process.platform === "win32" ? "music-to-piano-json.exe" : "music-to-piano-json";
+  const candidates = [
+    path.join(__dirname, "skill", "music-to-piano-json", "bin", executable),
+    process.resourcesPath
+      ? path.join(process.resourcesPath, "app.asar.unpacked", "skill", "music-to-piano-json", "bin", executable)
+      : "",
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    if (await pathExists(candidate)) return candidate;
+  }
+  return "";
+}
+
+async function findPythonRuntime() {
+  if (cachedPythonRuntime) return cachedPythonRuntime;
+  const candidates = process.platform === "win32"
+    ? [{ command: "py", prefix: ["-3"] }, { command: "python", prefix: [] }, { command: "python3", prefix: [] }]
+    : [{ command: "python3", prefix: [] }, { command: "python", prefix: [] }];
+  for (const candidate of candidates) {
+    try {
+      const { stdout, stderr } = await execFileAsync(candidate.command, [...candidate.prefix, "--version"], { windowsHide: true });
+      cachedPythonRuntime = { ...candidate, version: String(stdout || stderr || "Python 3").trim() };
+      return cachedPythonRuntime;
+    } catch (error) {
+      if (error?.code !== "ENOENT") continue;
+    }
+  }
+  throw new Error("Python 3 non trovato. Installa Python 3 e riavvia PianoVisual per usare Piano Lab.");
+}
+
+async function runPianoReduction(sourcePath, outputPath) {
+  const standalone = await standalonePianoEnginePath();
+  if (standalone) {
+    try {
+      const { stdout } = await execFileAsync(
+        standalone,
+        [sourcePath, "-o", outputPath, "--format", "program-compatible"],
+        { windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
+      );
+      return { summary: String(stdout || "").trim(), runtime: "motore integrato" };
+    } catch (error) {
+      throw new Error(String(error?.stderr || error?.message || "Riduzione pianistica fallita").trim());
+    }
+  }
+  const scriptPath = await pianoReductionScriptPath();
+  const runtime = await findPythonRuntime();
+  try {
+    const { stdout } = await execFileAsync(
+      runtime.command,
+      [...runtime.prefix, scriptPath, sourcePath, "-o", outputPath, "--format", "program-compatible"],
+      { windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
+    );
+    return { summary: String(stdout || "").trim(), runtime: runtime.version };
+  } catch (error) {
+    throw new Error(String(error?.stderr || error?.message || "Riduzione pianistica fallita").trim());
+  }
 }
 
 function normalizeText(value) {
@@ -381,10 +458,12 @@ function hashJsonData(jsonData) {
 }
 
 async function findDuplicateJsonSong(db, { hash, title, artist, fileName }) {
+  const expectedVariant = /-piano(?:-\d+)?\.json$/i.test(String(fileName || "")) ? "piano_reduction" : "full";
+  const nameMatch = findDuplicateSong(db, { hash: "", title, artist }).duplicate;
   const direct =
     db.songs.find((song) => song.jsonContentHash === hash) ||
     db.songs.find((song) => song.fileHash === hash) ||
-    findDuplicateSong(db, { hash: "", title, artist }).duplicate;
+    (nameMatch && (nameMatch.variantType === "piano_reduction" ? "piano_reduction" : "full") === expectedVariant ? nameMatch : null);
   if (direct) return direct;
 
   const incomingBase = normalizeText(path.basename(String(fileName || ""), path.extname(String(fileName || ""))));
@@ -606,6 +685,122 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/library/path") {
     await ensureSetup();
     sendJson(res, 200, { libraryDir: LIBRARY_DIR, jsonDir: JSON_DIR, dbPath: DB_PATH });
+    return true;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/piano-reduction/status") {
+    try {
+      const standalone = await standalonePianoEnginePath();
+      if (standalone) {
+        sendJson(res, 200, { available: true, engine: "music-to-piano-json", runtime: "Motore integrato nel setup desktop" });
+      } else {
+        await pianoReductionScriptPath();
+        const runtime = await findPythonRuntime();
+        sendJson(res, 200, { available: true, engine: "music-to-piano-json", runtime: runtime.version });
+      }
+    } catch (error) {
+      sendJson(res, 200, { available: false, engine: "music-to-piano-json", error: error.message });
+    }
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/piano-reduction/create") {
+    const payload = await readBodyJson(req);
+    const songId = String(payload.songId || "").trim();
+    const db = await readDb();
+    const sourceSong = db.songs.find((song) => song.id === songId);
+    if (!sourceSong) {
+      sendJson(res, 404, { error: "Brano sorgente non trovato" });
+      return true;
+    }
+    if (sourceSong.variantType === "piano_reduction") {
+      sendJson(res, 400, { error: "Il brano selezionato è già una riduzione pianistica" });
+      return true;
+    }
+    const existing = db.songs.find((song) => song.variantType === "piano_reduction" && song.derivedFromSongId === sourceSong.id);
+    if (existing && payload.replaceExisting !== true) {
+      sendJson(res, 409, { error: "Esiste già una riduzione di questo brano", existingSongId: existing.id });
+      return true;
+    }
+
+    const sourceName = path.basename(String(sourceSong.jsonPath || ""));
+    const sourcePath = path.join(JSON_DIR, sourceName);
+    if (!sourceName || !(await pathExists(sourcePath))) {
+      sendJson(res, 404, { error: "File JSON sorgente non trovato nella libreria" });
+      return true;
+    }
+
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pianovisual-piano-"));
+    const outputPath = path.join(tempDir, "reduction.json");
+    try {
+      const engineResult = await runPianoReduction(sourcePath, outputPath);
+      const reducedJson = JSON.parse(await fs.readFile(outputPath, "utf8"));
+      const validation = validatePianoVisionJsonData(reducedJson);
+      if (!validation.ok) throw new Error(`JSON ridotto non valido: ${validation.errors.join(", ")}`);
+
+      const base = sanitizeName(path.basename(sourceName, path.extname(sourceName))) || sanitizeName(sourceSong.title) || sourceSong.id;
+      let targetName = existing ? path.basename(String(existing.jsonPath || "")) : `${base}-piano.json`;
+      if (!existing) {
+        let seq = 2;
+        while (await pathExists(path.join(JSON_DIR, targetName))) {
+          targetName = `${base}-piano-${seq}.json`;
+          seq += 1;
+        }
+      }
+      const targetPath = path.join(JSON_DIR, targetName);
+      const reducedHash = hashJsonData(reducedJson);
+      await writeJsonAtomic(targetPath, reducedJson);
+
+      let reductionSong = existing || null;
+      if (!reductionSong) {
+        reductionSong = {
+          id: uid("piano"),
+          importedAt: nowIso(),
+        };
+        db.songs.push(reductionSong);
+        db.practiceMeta.push({
+          songId: reductionSong.id,
+          lastPracticePointSec: 0,
+          playbackSpeed: 1,
+          favoriteLoops: [],
+          studyStatus: "to_study",
+        });
+      }
+      Object.assign(reductionSong, {
+        title: `${sourceSong.title || "Senza titolo"} · Riduzione piano`,
+        artist: sourceSong.artist || "",
+        composer: sourceSong.composer || "",
+        genre: sourceSong.genre || "",
+        difficulty: sourceSong.difficulty || "intermedio",
+        key: sourceSong.key || "",
+        bpm: Number(sourceSong.bpm || 120),
+        duration: Number(reducedJson.song_length || sourceSong.duration || 0),
+        instruments: ["Piano mano destra", "Piano mano sinistra"],
+        updatedAt: nowIso(),
+        fileHash: reducedHash,
+        jsonContentHash: reducedHash,
+        sourceFileName: targetName,
+        jsonPath: `/library/json/${targetName}`,
+        midiPath: "",
+        variantType: "piano_reduction",
+        derivedFromSongId: sourceSong.id,
+        reductionEngine: "music-to-piano-json",
+      });
+      applySmartMembership(db, reductionSong);
+      await writeDb(db);
+
+      const rightNotes = (reducedJson?.tracksV2?.right || []).reduce((sum, measure) => sum + (measure?.notes || []).length, 0);
+      const leftNotes = (reducedJson?.tracksV2?.left || []).reduce((sum, measure) => sum + (measure?.notes || []).length, 0);
+      sendJson(res, 200, {
+        song: reductionSong,
+        summary: { measures: reducedJson.measures.length, rightNotes, leftNotes },
+        engine: engineResult,
+      });
+    } catch (error) {
+      sendJson(res, 422, { error: error.message });
+    } finally {
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
     return true;
   }
 
@@ -895,6 +1090,7 @@ async function handleApi(req, res, url) {
 
       const hash = hashJsonData(jsonData);
       const meta = inferSongMetadataFromJson(jsonData, safeFile);
+      const isPianoReduction = /-piano(?:-\d+)?\.json$/i.test(safeFile);
       const duplicate = await findDuplicateJsonSong(db, { hash, title: meta.title, artist: meta.artist, fileName: safeFile });
       const duplicateReason = duplicate ? "contenuto, nome file o metadati già presenti" : "";
 
@@ -931,6 +1127,7 @@ async function handleApi(req, res, url) {
           duplicate.updatedAt = nowIso();
           if (!duplicate.fileHash) duplicate.fileHash = hash;
           duplicate.jsonContentHash = hash;
+          if (isPianoReduction) duplicate.variantType = "piano_reduction";
           duplicate.sourceFileName = safeFile;
           duplicate.jsonPath = `/${path.relative(__dirname, targetJsonAbs).replace(/\\/g, "/")}`;
           duplicate.midiPath = "";
@@ -968,6 +1165,7 @@ async function handleApi(req, res, url) {
           updatedAt: nowIso(),
           fileHash: hash,
           jsonContentHash: hash,
+          ...(isPianoReduction ? { variantType: "piano_reduction", reductionEngine: "imported-compatible-json" } : {}),
           sourceFileName: safeFile,
           jsonPath: `/library/json/${jsonFileName}`,
           midiPath: "",

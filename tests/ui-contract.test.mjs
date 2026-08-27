@@ -18,6 +18,9 @@ test("ui critical controls exist for key workflows", async () => {
     "downloadSelectedBtn",
     "deleteSelectedBtn",
     "libraryToolbar",
+    "pianoLabPanel",
+    "pianoEngineStatus",
+    "createPianoReductionBtn",
     "remoteCatalogPanel",
     "remoteCatalogSearch",
     "remoteConvertBtn",
@@ -71,4 +74,10 @@ test("instrument toggles update the loaded count and scheduled audio", async () 
   assert.equal(app.includes("loadedInstruments.length ? loadedInstruments : instrumentsForSong(song)"), true);
   assert.equal(app.includes("stopScheduledAudio();"), true);
   assert.equal(app.includes("if (wasPlaying && hasPlayableNotes) await playPlayer(resumeAt)"), true);
+});
+
+test("desktop package includes and unpacks the local piano reduction engine", async () => {
+  const pkg = JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf8"));
+  assert.equal(pkg.build.files.includes("skill/music-to-piano-json/**/*"), true);
+  assert.equal(pkg.build.asarUnpack.includes("skill/music-to-piano-json/**/*"), true);
 });

@@ -17,6 +17,8 @@ const el = {
   viewTitle: document.getElementById("viewTitle"),
   playlistCount: document.getElementById("playlistCount"),
   libraryToolbar: document.getElementById("libraryToolbar"),
+  pianoLabPanel: document.getElementById("pianoLabPanel"),
+  pianoEngineStatus: document.getElementById("pianoEngineStatus"),
   importPanel: document.getElementById("importPanel"),
   remoteCatalogPanel: document.getElementById("remoteCatalogPanel"),
   remoteCatalogSearch: document.getElementById("remoteCatalogSearch"),
@@ -143,6 +145,8 @@ const el = {
   visualizerCanvas: document.getElementById("visualizerCanvas"),
   visualizerLegend: document.getElementById("visualizerLegend"),
   exportVisualizerSelectionBtn: document.getElementById("exportVisualizerSelectionBtn"),
+  pianoReductionCta: document.getElementById("pianoReductionCta"),
+  createPianoReductionBtn: document.getElementById("createPianoReductionBtn"),
   footerTrackTitle: document.getElementById("footerTrackTitle"),
   footerTrackArtist: document.getElementById("footerTrackArtist"),
   miniVisualizer: document.getElementById("miniVisualizer"),
@@ -1206,7 +1210,7 @@ function updateKeyFilterOptions() {
 }
 
 function filteredSongs() {
-  const isLibraryView = state.view === "library";
+  const isLibraryView = state.view === "library" || state.view === "reductions";
   const q = isLibraryView ? el.searchInput.value.trim().toLowerCase() : "";
   const bpmFilter = isLibraryView ? el.bpmFilter.value : "";
   const keyFilter = isLibraryView ? el.keyFilter.value : "";
@@ -1214,6 +1218,8 @@ function filteredSongs() {
   const durFilter = isLibraryView ? el.durationFilter.value : "";
 
   let list = [...(state.db?.songs || [])];
+  if (state.view === "reductions") list = list.filter((song) => song.variantType === "piano_reduction");
+  else list = list.filter((song) => song.variantType !== "piano_reduction");
 
   if (state.view === "favorites") list = list.filter((s) => isFavorite(s.id));
   if (state.view === "genres") {
@@ -1339,15 +1345,16 @@ function renderTable() {
         state.view === "playlists" && state.selectedPlaylistId
           ? `<button class="icon-btn" data-row-action="remove-playlist" data-song-id="${song.id}" title="Rimuovi dalla playlist aperta">−</button>`
           : `<button class="icon-btn" data-row-action="playlist" data-song-id="${song.id}" title="Aggiungi playlist">＋</button>`;
+      const pianoVariant = song.variantType === "piano_reduction";
       return `
-        <tr data-song-id="${song.id}" class="${active}">
+        <tr data-song-id="${song.id}" class="${active}${pianoVariant ? " piano-row" : ""}">
           <td><input type="checkbox" data-row-action="select" data-song-id="${song.id}" ${checked} /></td>
           <td>
             <div class="song-cell">
               <div class="cover">${escapeHtml(avatar)}</div>
               <div>
                 <strong>${escapeHtml(song.title || "Senza titolo")}</strong><br />
-                <small>${isFavorite(song.id) ? "★ Preferito" : ""}</small>
+                <small>${pianoVariant ? '<span class="piano-table-badge">Piano</span>' : isFavorite(song.id) ? "★ Preferito" : ""}</small>
               </div>
             </div>
           </td>
@@ -1376,7 +1383,9 @@ function renderTable() {
 }
 
 function renderDirectoryPanel() {
-  const songs = state.db?.songs || [];
+  const allSongs = state.db?.songs || [];
+  const songs = allSongs.filter((song) => song.variantType !== "piano_reduction");
+  const reductionCount = allSongs.filter((song) => song.variantType === "piano_reduction").length;
   const manual = (state.db?.collections || []).filter((c) => c.type === "playlist" && !c.smartRule);
   el.playlistsCards.classList.toggle("home-dashboard", state.view === "home");
 
@@ -1424,6 +1433,7 @@ function renderDirectoryPanel() {
           <button class="home-action-card import-action" data-nav-target="import"><span>＋</span><strong>Importa brani</strong><small>MIDI, JSON o cartella</small></button>
           <button class="home-action-card remote-action" data-nav-target="remote"><span>⌕</span><strong>Catalogo remoto</strong><small>Cerca artista o titolo</small></button>
           <button class="home-action-card playlist-action" data-nav-target="playlists"><span>≡</span><strong>Le tue playlist</strong><small>${manual.length} playlist create</small></button>
+          <button class="home-action-card piano-action" data-nav-target="reductions"><span>♬</span><strong>Piano Lab</strong><small>${reductionCount} riduzioni pianistiche</small></button>
         </div>
       </section>
 
@@ -1545,7 +1555,7 @@ function renderDirectoryPanel() {
 
 function shouldShowTable() {
   if (state.view === "home" || state.view === "import") return false;
-  if (state.view === "library") return true;
+  if (state.view === "library" || state.view === "reductions") return true;
   if (state.view === "playlists") return Boolean(state.selectedPlaylistId);
   if (state.view === "genres") return Boolean(state.selectedGenre);
   if (state.view === "artists") return Boolean(state.selectedArtist);
@@ -1572,6 +1582,7 @@ function renderViewLabels() {
     genres: ["Generi", "Tag / Generi"],
     artists: ["Artisti", "Catalogo Artisti"],
     remote: ["Catalogo remoto", "Artisti e brani MIDI"],
+    reductions: ["Piano Lab", "Riduzioni pianistiche"],
   };
   const [k, t] = map[state.view] || map.home;
   el.viewKicker.textContent = k;
@@ -1585,17 +1596,21 @@ function renderViewLabels() {
   if (state.view === "genres" && state.selectedGenre) context = `Genere aperto: ${state.selectedGenre}`;
   if (state.view === "artists" && state.selectedArtist) context = `Artista aperto: ${state.selectedArtist}`;
   if (state.view === "remote") context = "Catalogo consultato senza scaricare file MIDI";
+  if (state.view === "reductions") context = `${(state.db?.songs || []).filter((song) => song.variantType === "piano_reduction").length} riduzioni disponibili`;
   el.playlistCount.textContent = context;
   el.importPanel.classList.toggle("hidden", state.view !== "import");
   el.remoteCatalogPanel.classList.toggle("hidden", state.view !== "remote");
+  el.pianoLabPanel?.classList.toggle("hidden", state.view !== "reductions");
   el.playlistsSection.classList.toggle("hidden", !["home", "library", "playlists", "genres", "artists"].includes(state.view));
   el.smartPlaylistsSection.classList.toggle("hidden", state.view !== "home");
-  const libraryOnly = state.view === "library";
+  const libraryOnly = state.view === "library" || state.view === "reductions";
   el.libraryToolbar?.classList.toggle("hidden", !libraryOnly);
   el.searchWrap.classList.toggle("hidden", !libraryOnly);
   el.filterPanel.classList.toggle("hidden", !libraryOnly);
   el.detailPanel.classList.toggle("hidden", !libraryOnly);
   el.contentGrid.classList.toggle("single-column", !libraryOnly);
+  el.contentGrid.classList.toggle("piano-workspace", state.view === "reductions");
+  document.documentElement.dataset.workspace = state.view === "reductions" ? "piano" : "library";
   const showTable = shouldShowTable();
   el.tableWrap.classList.toggle("hidden", !showTable);
   el.paginationWrap.classList.toggle("hidden", !showTable);
@@ -1607,6 +1622,7 @@ function renderDetail() {
     el.emptyDetail.classList.remove("hidden");
     el.detailContent.classList.add("hidden");
     if (el.visualizerLegend) el.visualizerLegend.innerHTML = "";
+    el.pianoReductionCta?.classList.add("hidden");
     if (el.exportVisualizerSelectionBtn) {
       el.exportVisualizerSelectionBtn.textContent = "Esporta strumenti selezionati";
       el.exportVisualizerSelectionBtn.disabled = true;
@@ -1630,6 +1646,7 @@ function renderDetail() {
 
   el.detailTitle.textContent = song.title || "Senza titolo";
   el.detailSubtitle.textContent = `${song.artist || "Artista sconosciuto"} · ${song.composer || "Compositore n/d"}`;
+  el.pianoReductionCta?.classList.toggle("hidden", song.variantType === "piano_reduction");
   if (el.exportVisualizerSelectionBtn) {
     el.exportVisualizerSelectionBtn.textContent = `Esporta ${activeCount} ${activeCount === 1 ? "strumento" : "strumenti"}`;
     el.exportVisualizerSelectionBtn.disabled = activeCount === 0;
@@ -1643,6 +1660,7 @@ function renderDetail() {
     `<li><strong>Durata:</strong> ${secondsToClock(song.duration || 0)}</li>`,
     `<li><strong>Tracce attive:</strong> ${activeCount} / ${instruments.length || 0}</li>`,
     `<li><strong>Strumenti:</strong> ${escapeHtml(instruments.join(", ") || "-")}</li>`,
+    song.variantType === "piano_reduction" ? `<li class="piano-origin"><strong>Tipo:</strong> Riduzione pianistica</li>` : "",
     `<li><strong>Tag:</strong> ${escapeHtml(tags.join(", ") || "-")}</li>`,
     `<li><strong>Playlist:</strong> ${escapeHtml(playlists.join(", ") || "-")}</li>`,
     `<li><strong>Path JSON:</strong> ${escapeHtml(song.jsonPath || "-")}</li>`,
@@ -1689,9 +1707,54 @@ async function refreshDb() {
   }
 }
 
+async function loadPianoEngineStatus() {
+  if (!el.pianoEngineStatus) return;
+  el.pianoEngineStatus.className = "piano-engine-status";
+  el.pianoEngineStatus.textContent = "Verifica del motore di riduzione…";
+  try {
+    const result = await api("/api/piano-reduction/status");
+    if (result.available) {
+      el.pianoEngineStatus.classList.add("ok");
+      el.pianoEngineStatus.textContent = `Motore pronto · ${result.runtime}`;
+    } else {
+      el.pianoEngineStatus.classList.add("error");
+      el.pianoEngineStatus.textContent = result.error || "Motore di riduzione non disponibile";
+    }
+  } catch (error) {
+    el.pianoEngineStatus.classList.add("error");
+    el.pianoEngineStatus.textContent = error.message;
+  }
+}
+
+async function createPianoReduction() {
+  const song = getSongById(state.selectedSongId);
+  if (!song || song.variantType === "piano_reduction") return;
+  if (!confirm(`Creare una riduzione pianistica di “${song.title || "Senza titolo"}”?\n\nIl brano completo resterà invariato.`)) return;
+  showLoading(true);
+  if (el.createPianoReductionBtn) el.createPianoReductionBtn.disabled = true;
+  try {
+    const result = await api("/api/piano-reduction/create", {
+      method: "POST",
+      body: JSON.stringify({ songId: song.id }),
+    });
+    await refreshDb();
+    state.selectedSongId = result.song.id;
+    selectNav("reductions");
+    toast(`Riduzione creata: ${result.summary.rightNotes} note mano destra, ${result.summary.leftNotes} mano sinistra`, "ok");
+  } catch (error) {
+    toast(`Riduzione non creata: ${error.message}`, "error");
+  } finally {
+    if (el.createPianoReductionBtn) el.createPianoReductionBtn.disabled = false;
+    showLoading(false);
+  }
+}
+
 function selectNav(view) {
   state.view = view;
   state.page = 1;
+  const currentSong = getSongById(state.selectedSongId);
+  if (view === "reductions" && currentSong?.variantType !== "piano_reduction") state.selectedSongId = "";
+  if (view !== "reductions" && currentSong?.variantType === "piano_reduction") state.selectedSongId = "";
   if (view !== "playlists") state.selectedPlaylistId = "";
   if (view !== "genres") state.selectedGenre = "";
   if (view !== "artists") state.selectedArtist = "";
@@ -1702,6 +1765,7 @@ function selectNav(view) {
   }
   render();
   if (view === "remote" && !state.remoteCatalog.loaded) loadRemoteArtists();
+  if (view === "reductions") loadPianoEngineStatus();
 }
 
 function onDirectoryPanelClick(event) {
@@ -2898,7 +2962,29 @@ function animateMiniVisualizer() {
   requestAnimationFrame(animateMiniVisualizer);
 }
 
-function extractPlayableTracks(jsonData, fallbackInstruments = []) {
+function extractPianoReductionTracks(jsonData) {
+  const hands = [
+    { key: "right", instrument: "Piano mano destra" },
+    { key: "left", instrument: "Piano mano sinistra" },
+  ];
+  return hands
+    .map(({ key, instrument }) => {
+      const notes = (jsonData?.tracksV2?.[key] || []).flatMap((measure) =>
+        (measure?.notes || []).map((note) => ({
+          midi: Number(note.note ?? note.midi ?? 60),
+          time: Number(note.start ?? note.time ?? 0),
+          duration: Math.max(0.05, Number(note.duration || 0.2)),
+          velocity: clamp01(Number(note.velocity ?? 0.7)),
+          instrument,
+        })),
+      );
+      return { instrument, notes };
+    })
+    .filter((track) => track.notes.length > 0);
+}
+
+function extractPlayableTracks(jsonData, fallbackInstruments = [], song = null) {
+  if (song?.variantType === "piano_reduction") return extractPianoReductionTracks(jsonData);
   const originalTracks = Array.isArray(jsonData?.original?.tracks) ? jsonData.original.tracks : [];
   if (originalTracks.length > 0) {
     return originalTracks
@@ -3000,7 +3086,7 @@ async function loadSelectedSongForPlayer(forceReload = false) {
   }
 
   const fallbackInstruments = instrumentsForSong(song);
-  const trackGroups = extractPlayableTracks(jsonData, fallbackInstruments);
+  const trackGroups = extractPlayableTracks(jsonData, fallbackInstruments, song);
   const availableInstruments = [...new Set(trackGroups.map((g) => g.instrument).filter(Boolean))];
   const stored = state.player.activeInstrumentsBySong[song.id];
   const activeInstruments = Array.isArray(stored)
@@ -4034,6 +4120,7 @@ function bindEvents() {
   el.toggleFavoriteBtn.addEventListener("click", toggleFavoriteSelected);
   el.exportFilteredJsonBtn.addEventListener("click", exportFilteredSongJson);
   el.exportVisualizerSelectionBtn.addEventListener("click", exportFilteredSongJson);
+  el.createPianoReductionBtn.addEventListener("click", createPianoReduction);
   el.addToPlaylistBtn.addEventListener("click", addSelectedToPlaylist);
 
   el.renamePlaylistBtn.addEventListener("click", managePlaylist);

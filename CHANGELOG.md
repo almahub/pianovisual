@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.19] - 2026-08-27
+### Added
+- Nuova area visivamente separata “Piano Lab” con libreria dedicata alle riduzioni pianistiche.
+- Integrazione locale della skill `music-to-piano-json` per analizzare melodia, armonia e basso e ricostruire `tracksV2`.
+- Creazione non distruttiva di una riduzione collegata al brano completo originale.
+- Riproduzione delle riduzioni tramite tracce distinte “Piano mano destra” e “Piano mano sinistra”.
+- Motore autonomo incluso nel setup Windows, senza necessità di installare Python nell’app distribuita.
+
+### Changed
+- La libreria standard mostra soltanto i brani completi; le riduzioni sono conteggiate e consultate esclusivamente in Piano Lab.
+
 ## [1.0.18] - 2026-08-27
 ### Changed
 - Barra laterale alleggerita con gruppi richiudibili per Studio, File e backup, Quest 3 e Aspetto.

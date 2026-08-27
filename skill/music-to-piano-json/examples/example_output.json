@@ -1,0 +1,297 @@
+{
+  "format": "piano_reduction_v2",
+  "title": "Structured Demo",
+  "artist": "Example",
+  "source": {
+    "filename": "example_input.json",
+    "type": "json",
+    "analysis_mode": "structured",
+    "confidence": 1.0
+  },
+  "musicalInfo": {
+    "ppq": 480,
+    "tempo": 100.0,
+    "meter": [
+      4,
+      4
+    ],
+    "key": "C major",
+    "tempoMap": [
+      {
+        "time": 0,
+        "bpm": 100.0
+      }
+    ],
+    "timeSignatureMap": [
+      {
+        "time": 0,
+        "numerator": 4,
+        "denominator": 4
+      }
+    ],
+    "keySignatureMap": [],
+    "duration": 4.8
+  },
+  "sections": [
+    {
+      "id": "intro",
+      "type": "intro",
+      "start": 0,
+      "end": 4.8,
+      "confidence": 0.4
+    }
+  ],
+  "chords": [
+    {
+      "time": 0,
+      "duration": 0.6,
+      "measure": 1,
+      "beat": 1,
+      "symbol": "C",
+      "root": 0,
+      "quality": "major",
+      "bass": "C",
+      "pitchClasses": [
+        0,
+        4,
+        7
+      ],
+      "confidence": 0.9
+    },
+    {
+      "time": 0.6,
+      "duration": 0.6,
+      "measure": 1,
+      "beat": 2,
+      "symbol": "C6",
+      "root": 0,
+      "quality": "6",
+      "bass": "C",
+      "pitchClasses": [
+        0,
+        4,
+        7,
+        9
+      ],
+      "confidence": 0.9
+    },
+    {
+      "time": 1.2,
+      "duration": 0.6,
+      "measure": 1,
+      "beat": 3,
+      "symbol": "Cmaj7",
+      "root": 0,
+      "quality": "major7",
+      "bass": "C",
+      "pitchClasses": [
+        0,
+        4,
+        7,
+        11
+      ],
+      "confidence": 0.9
+    },
+    {
+      "time": 1.8,
+      "duration": 0.6,
+      "measure": 1,
+      "beat": 4,
+      "symbol": "C",
+      "root": 0,
+      "quality": "major",
+      "bass": "C",
+      "pitchClasses": [
+        0,
+        4,
+        7
+      ],
+      "confidence": 0.9
+    },
+    {
+      "time": 2.4,
+      "duration": 1.2,
+      "measure": 2,
+      "beat": 1,
+      "symbol": "F",
+      "root": 5,
+      "quality": "major",
+      "bass": "F",
+      "pitchClasses": [
+        0,
+        5,
+        9
+      ],
+      "confidence": 0.72
+    },
+    {
+      "time": 3.6,
+      "duration": 1.2,
+      "measure": 2,
+      "beat": 3,
+      "symbol": "Fadd9",
+      "root": 5,
+      "quality": "add9",
+      "bass": "F",
+      "pitchClasses": [
+        0,
+        5,
+        7,
+        9
+      ],
+      "confidence": 0.9
+    }
+  ],
+  "tracks": [
+    {
+      "id": "melody",
+      "name": "Melodia",
+      "role": "melody",
+      "hand": "right",
+      "instrument": "piano",
+      "confidence": 0.897,
+      "notes": [
+        {
+          "midi": 67,
+          "name": "G4",
+          "time": 0,
+          "duration": 0.6,
+          "velocity": 0.82,
+          "confidence": 1.0
+        },
+        {
+          "midi": 69,
+          "name": "A4",
+          "time": 0.6,
+          "duration": 0.6,
+          "velocity": 0.8,
+          "confidence": 1.0
+        },
+        {
+          "midi": 71,
+          "name": "B4",
+          "time": 1.2,
+          "duration": 0.6,
+          "velocity": 0.8,
+          "confidence": 1.0
+        },
+        {
+          "midi": 72,
+          "name": "C5",
+          "time": 1.8,
+          "duration": 0.6,
+          "velocity": 0.86,
+          "confidence": 1.0
+        },
+        {
+          "midi": 71,
+          "name": "B4",
+          "time": 2.4,
+          "duration": 0.6,
+          "velocity": 0.8,
+          "confidence": 1.0
+        },
+        {
+          "midi": 69,
+          "name": "A4",
+          "time": 3.0,
+          "duration": 0.6,
+          "velocity": 0.8,
+          "confidence": 1.0
+        },
+        {
+          "midi": 67,
+          "name": "G4",
+          "time": 3.6,
+          "duration": 1.2,
+          "velocity": 0.86,
+          "confidence": 1.0
+        }
+      ]
+    },
+    {
+      "id": "harmony",
+      "name": "Armonia pianistica",
+      "role": "harmony",
+      "hand": "right",
+      "instrument": "piano",
+      "confidence": 0.809,
+      "notes": [
+        {
+          "midi": 60,
+          "name": "C4",
+          "time": 0,
+          "duration": 2.4,
+          "velocity": 0.8,
+          "confidence": 1.0
+        },
+        {
+          "midi": 52,
+          "name": "E3",
+          "time": 0,
+          "duration": 2.4,
+          "velocity": 0.8,
+          "confidence": 1.0
+        },
+        {
+          "midi": 55,
+          "name": "G3",
+          "time": 0,
+          "duration": 2.4,
+          "velocity": 0.8,
+          "confidence": 1.0
+        },
+        {
+          "midi": 53,
+          "name": "F3",
+          "time": 2.4,
+          "duration": 2.4,
+          "velocity": 0.8,
+          "confidence": 1.0
+        },
+        {
+          "midi": 57,
+          "name": "A3",
+          "time": 2.4,
+          "duration": 2.4,
+          "velocity": 0.8,
+          "confidence": 1.0
+        },
+        {
+          "midi": 60,
+          "name": "C4",
+          "time": 2.4,
+          "duration": 2.4,
+          "velocity": 0.8,
+          "confidence": 1.0
+        }
+      ]
+    },
+    {
+      "id": "bass",
+      "name": "Basso",
+      "role": "bass",
+      "hand": "left",
+      "instrument": "piano",
+      "confidence": 0.964,
+      "notes": [
+        {
+          "midi": 36,
+          "name": "C2",
+          "time": 0,
+          "duration": 2.4,
+          "velocity": 0.8,
+          "confidence": 1.0
+        },
+        {
+          "midi": 41,
+          "name": "F2",
+          "time": 2.4,
+          "duration": 2.4,
+          "velocity": 0.8,
+          "confidence": 1.0
+        }
+      ]
+    }
+  ]
+}
