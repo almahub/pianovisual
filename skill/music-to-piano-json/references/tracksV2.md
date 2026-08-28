@@ -15,6 +15,8 @@ Compatibility mode requires all of these top-level fields:
 - Detect the melody by scoring source tracks for monophony, register, continuity, note count/density, interval motion, simultaneity, and instrument/name evidence. Penalize bass sources, guitar accompaniment, and very sparse ornamental parts.
 - Detect bass using low register, monophony, overlap behavior, and bass name/instrument evidence.
 - Detect harmony using simultaneity/polyphony and middle-register behavior.
+- Infer chords from non-melody sources so melodic passing tones do not alter the accompaniment harmony.
+- Align reduced harmony and bass pitch classes to the active detected chord, splitting sustained notes at real chord boundaries while preserving source timing and velocity.
 - Build `tracksV2.right` from melody followed by the selected reduced harmony source.
 - Build `tracksV2.left` from bass.
 - Do not stack every source accompaniment track into the right hand.

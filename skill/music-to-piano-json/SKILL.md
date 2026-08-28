@@ -28,6 +28,8 @@ The scripts use only Python's standard library. They accept `.json`, `.mid`, `.m
 - Score source tracks/parts using monophony, register, continuity, density, interval motion, simultaneity, name/instrument hints, and low-register behavior.
 - Never assume an instrument name alone determines its role.
 - Keep `chords` distinct from `harmony`: chords describe harmonic identity; harmony notes encode a piano voicing.
+- Infer chord identity from accompaniment and bass after excluding the detected melody, so passing melody tones do not create false chord extensions.
+- Split harmony and bass notes at chord boundaries when necessary and keep their pitch classes inside the active chord; melody may retain intentional non-chord tones.
 - Produce logical `melody`, `harmony`, and `bass` tracks. Melody and harmony normally use the right hand; bass uses the left.
 - Avoid harmony notes within three semitones below or one semitone above a simultaneous melody note. Keep accompaniment approximately C3-C5 and bass approximately C2-C4 by octave displacement.
 - Preserve structured timing. If an input has no reliable beat grid, omit unsupported measure/beat fields instead of inventing them.

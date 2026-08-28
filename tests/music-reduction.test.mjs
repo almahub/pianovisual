@@ -1,0 +1,47 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+const execFileAsync = promisify(execFile);
+const root = process.cwd();
+
+test("piano harmony and bass stay aligned with the detected chords", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pianovisual-music-test-"));
+  const output = path.join(tempDir, "reduction.json");
+  try {
+    await execFileAsync("python3", [
+      path.join(root, "skill/music-to-piano-json/scripts/convert.py"),
+      path.join(root, "skill/music-to-piano-json/examples/example_input.json"),
+      "-o",
+      output,
+      "--format",
+      "normalized",
+    ]);
+    const reduction = JSON.parse(await fs.readFile(output, "utf8"));
+    assert.deepEqual(reduction.chords.map((chord) => chord.symbol), ["C", "F"]);
+
+    for (const role of ["harmony", "bass"]) {
+      const track = reduction.tracks.find((item) => item.role === role);
+      assert.ok(track?.notes.length > 0, `${role} must contain notes`);
+      for (const note of track.notes) {
+        const noteEnd = note.time + note.duration;
+        const activeChords = reduction.chords.filter(
+          (chord) => chord.time < noteEnd - 1e-6 && chord.time + chord.duration > note.time + 1e-6,
+        );
+        assert.ok(activeChords.length > 0, `${role} note must overlap a chord`);
+        for (const chord of activeChords) {
+          assert.ok(
+            chord.pitchClasses.includes(note.midi % 12),
+            `${role} note ${note.name} is outside chord ${chord.symbol}`,
+          );
+        }
+      }
+    }
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});

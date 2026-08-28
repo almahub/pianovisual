@@ -222,24 +222,55 @@ def infer_chords(tracks,info):
         else:merged.append(c)
     return merged
 
-def reduce(tracks,info):
-    mi,hi,bi,fs=classify(tracks); melody=[dict(n) for n in tracks[mi]['notes']]
+def _nearest_chord_pitch(original, pitch_classes, low, high, colliding=None):
+    candidates=[pitch for pitch in range(low,high+1) if pitch%12 in pitch_classes]
+    if not candidates:return int(clamp(original,low,high))
+    same_pitch_class=[pitch for pitch in candidates if pitch%12==original%12]
+    if same_pitch_class:candidates=same_pitch_class
+    colliding=colliding or []
+    def score(pitch):
+        collision=any(-3<=pitch-note['midi']<=1 for note in colliding)
+        return (100 if collision else 0)+abs(pitch-original)+abs(pitch-(low+high)/2)*.03
+    return min(candidates,key=score)
+
+def _align_notes_to_chords(notes,chords,low,high,melody=None):
+    if not chords:
+        out=[]
+        for source in notes:
+            n=dict(source)
+            while n['midi']<low:n['midi']+=12
+            while n['midi']>high:n['midi']-=12
+            n['name']=note_name(n['midi']);out.append(n)
+        return out
+    aligned=[];seen=set();melody=melody or []
+    for source in notes:
+        note_start=float(source['time']);note_end=note_start+float(source['duration'])
+        overlaps=sorted((c for c in chords if c['time']<note_end-1e-6 and c['time']+c['duration']>note_start+1e-6),key=lambda c:c['time'])
+        segments=[];cursor=note_start
+        for chord in overlaps:
+            chord_start=max(note_start,float(chord['time']));chord_end=min(note_end,float(chord['time'])+float(chord['duration']))
+            if chord_start>cursor+1e-6:segments.append((cursor,chord_start,None))
+            segments.append((chord_start,chord_end,chord));cursor=max(cursor,chord_end)
+        if cursor<note_end-1e-6:segments.append((cursor,note_end,None))
+        if not segments:segments=[(note_start,note_end,None)]
+        for start,end,chord in segments:
+            if end-start<=1e-6:continue
+            simultaneous=[m for m in melody if m['time']<end-1e-6 and m['time']+m['duration']>start+1e-6]
+            pitch_classes=set(chord['pitchClasses']) if chord else {int(source['midi'])%12}
+            pitch=_nearest_chord_pitch(int(source['midi']),pitch_classes,low,high,simultaneous)
+            key=(round(start,6),round(end-start,6),pitch)
+            if key in seen:continue
+            seen.add(key);n=dict(source);n['midi']=pitch;n['name']=note_name(pitch)
+            n['time']=round(start,6);n['duration']=round(end-start,6);aligned.append(n)
+    return sorted(aligned,key=lambda n:(n['time'],n['midi']))
+
+def reduce(tracks,info,chords=None,classification=None):
+    mi,hi,bi,fs=classification or classify(tracks); melody=[dict(n) for n in tracks[mi]['notes']]
     # A reduction must remain playable: use the strongest harmonic source instead
     # of stacking every orchestral accompaniment track into one piano hand.
     source_h=[dict(n) for n in tracks[hi]['notes']]
-    harmony=[]
-    for n in source_h:
-        while n['midi']<48:n['midi']+=12
-        while n['midi']>72:n['midi']-=12
-        coll=[m for m in melody if m['time']<n['time']+n['duration'] and m['time']+m['duration']>n['time']]
-        if any(-3<=n['midi']-m['midi']<=1 for m in coll):n['midi']-=12
-        n['name']=note_name(n['midi']); harmony.append(n)
-    bass=[]
-    for n in tracks[bi]['notes']:
-        n=dict(n)
-        while n['midi']<36:n['midi']+=12
-        while n['midi']>60:n['midi']-=12
-        n['name']=note_name(n['midi']);bass.append(n)
+    harmony=_align_notes_to_chords(source_h,chords or [],48,72,melody)
+    bass=_align_notes_to_chords(tracks[bi]['notes'],chords or [],36,60)
     return [
       {'id':'melody','name':'Melodia','role':'melody','hand':'right','instrument':'piano','confidence':round(fs[mi]['melody'],3),'notes':melody},
       {'id':'harmony','name':'Armonia pianistica','role':'harmony','hand':'right','instrument':'piano','confidence':round(fs[hi]['harmony'],3),'notes':harmony},
@@ -278,7 +309,9 @@ def build(path,start=0,end=None,title=None,artist=None):
     kind=inspect_input(path); parser={'json':parse_json,'midi':parse_midi,'musicxml':parse_musicxml}[kind]; tracks,info=parser(path)
     tracks,info=crop(tracks,info,start,end); tracks=[t for t in tracks if t['notes']]
     if not tracks:raise ValueError('Selected interval contains no notes')
-    chords=infer_chords(tracks,info); reduced=reduce(tracks,info)
+    classification=classify(tracks);melody_index=classification[0]
+    harmonic_tracks=[track for index,track in enumerate(tracks) if index!=melody_index] or tracks
+    chords=infer_chords(harmonic_tracks,info); reduced=reduce(tracks,info,chords,classification)
     return {'format':'piano_reduction_v2','title':title or info.pop('title',Path(path).stem),'artist':artist if artist is not None else info.pop('artist',''),
       'source':{'filename':Path(path).name,'type':kind,'analysis_mode':'structured','confidence':1.0},'musicalInfo':info,
       'sections':sections(chords,info),'chords':chords,'tracks':reduced}
