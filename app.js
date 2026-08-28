@@ -3520,9 +3520,10 @@ async function exportBackup() {
       return;
     }
     const zip = new JSZip();
-    const folder = zip.folder("json");
+    const completeFolder = zip.folder("json");
+    const pianoFolder = zip.folder("jsonpiano");
     for (const file of files) {
-      folder.file(file.fileName, file.content);
+      (file.libraryType === "piano" ? pianoFolder : completeFolder).file(file.fileName, file.content);
     }
     const blob = await zip.generateAsync({ type: "blob" });
     const fileName = `pianovisual-json-${Date.now()}.zip`;

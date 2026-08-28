@@ -8,7 +8,9 @@ import os from 'node:os';
 const root = process.cwd();
 const libraryDir = path.join(root, 'library');
 const jsonDir = path.join(libraryDir, 'json');
+const pianoJsonDir = path.join(libraryDir, 'jsonpiano');
 const dbPath = path.join(libraryDir, 'db.json');
+const pianoDbPath = path.join(libraryDir, 'dbpiano.json');
 const PORT = 6199;
 const BASE = `http://127.0.0.1:${PORT}`;
 
@@ -35,9 +37,13 @@ function defaultDb() {
 
 async function resetLibrary() {
   await fs.mkdir(jsonDir, { recursive: true });
+  await fs.mkdir(pianoJsonDir, { recursive: true });
   const entries = await fs.readdir(jsonDir);
+  const pianoEntries = await fs.readdir(pianoJsonDir);
   await Promise.all(entries.filter((x) => x.endsWith('.json')).map((x) => fs.rm(path.join(jsonDir, x), { force: true })));
+  await Promise.all(pianoEntries.filter((x) => x.endsWith('.json')).map((x) => fs.rm(path.join(pianoJsonDir, x), { force: true })));
   await fs.writeFile(dbPath, JSON.stringify(defaultDb(), null, 2) + '\n', 'utf8');
+  await fs.writeFile(pianoDbPath, JSON.stringify({ ...defaultDb(), collections: [] }, null, 2) + '\n', 'utf8');
 }
 
 async function api(pathname, options = {}) {
@@ -327,13 +333,46 @@ test('Piano Lab creates a separate compatible reduction linked to the full song'
   });
   assert.equal(result.song.variantType, 'piano_reduction');
   assert.equal(result.song.derivedFromSongId, imported.songs[0].id);
+  assert.equal(result.song.title, 'Skill Source piano');
+  assert.match(result.song.jsonPath, /^\/library\/jsonpiano\//);
   assert.equal(result.summary.measures, 1);
 
   const db = await api('/api/library');
   assert.equal(db.songs.length, 2);
-  const reduced = JSON.parse(await fs.readFile(path.join(jsonDir, path.basename(result.song.jsonPath)), 'utf8'));
+  const fullDb = JSON.parse(await fs.readFile(dbPath, 'utf8'));
+  const pianoDb = JSON.parse(await fs.readFile(pianoDbPath, 'utf8'));
+  assert.equal(fullDb.songs.length, 1);
+  assert.equal(pianoDb.songs.length, 1);
+  const reduced = JSON.parse(await fs.readFile(path.join(pianoJsonDir, path.basename(result.song.jsonPath)), 'utf8'));
   assert.equal(reduced.tracksV2.right.length, reduced.measures.length);
   assert.equal(reduced.tracksV2.left.length, reduced.measures.length);
+});
+
+test('existing piano reductions migrate from json and db.json to the dedicated library', async () => {
+  const legacyFileName = 'legacy-song-piano.json';
+  await fs.writeFile(path.join(jsonDir, legacyFileName), JSON.stringify(makeCompatiblePianoVisionJson(), null, 2) + '\n', 'utf8');
+  const legacyDb = defaultDb();
+  legacyDb.songs.push({
+    id: 'piano-legacy',
+    title: 'Legacy Song · Riduzione piano',
+    artist: 'Tester',
+    genre: 'Classica',
+    midiPath: '',
+    sourceFileName: legacyFileName,
+    jsonPath: `/library/json/${legacyFileName}`,
+    variantType: 'piano_reduction',
+  });
+  legacyDb.practiceMeta.push({ songId: 'piano-legacy', lastPracticePointSec: 0, playbackSpeed: 1, favoriteLoops: [], studyStatus: 'to_study' });
+  await fs.writeFile(dbPath, JSON.stringify(legacyDb, null, 2) + '\n', 'utf8');
+
+  const merged = await api('/api/library');
+  const migrated = merged.songs.find((song) => song.id === 'piano-legacy');
+  assert.equal(migrated.title, 'Legacy Song piano');
+  assert.equal(migrated.jsonPath, `/library/jsonpiano/${legacyFileName}`);
+  assert.equal(await fs.stat(path.join(pianoJsonDir, legacyFileName)).then(() => true), true);
+  await assert.rejects(fs.access(path.join(jsonDir, legacyFileName)));
+  assert.equal((JSON.parse(await fs.readFile(dbPath, 'utf8'))).songs.length, 0);
+  assert.equal((JSON.parse(await fs.readFile(pianoDbPath, 'utf8'))).songs.length, 1);
 });
 
 test('import-json-archive overwrite duplicate updates metadata', async () => {

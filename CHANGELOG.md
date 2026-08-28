@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.20] - 2026-08-28
+### Added
+- Libreria fisica dedicata ai brani piano in `library/jsonpiano`, indicizzata separatamente da `library/dbpiano.json`.
+- Migrazione automatica e non distruttiva delle riduzioni create dalle versioni precedenti.
+
+### Changed
+- Le riduzioni sono nominate con il formato “Nome brano piano”, senza la dicitura “Riduzione piano”.
+- Importazione JSON, riallineamento da disco, backup ZIP e sincronizzazione Quest rispettano entrambe le librerie.
+
 ## [1.0.19] - 2026-08-27
 ### Added
 - Nuova area visivamente separata “Piano Lab” con libreria dedicata alle riduzioni pianistiche.

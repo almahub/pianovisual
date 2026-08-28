@@ -39,11 +39,14 @@ function runtimeLibraryDir() {
 async function ensureRuntimeLibrary() {
   const base = runtimeLibraryDir();
   const jsonDir = path.join(base, "json");
+  const pianoJsonDir = path.join(base, "jsonpiano");
   const exportsDir = path.join(base, "exports");
   const dbPath = path.join(base, "db.json");
+  const pianoDbPath = path.join(base, "dbpiano.json");
 
   await fs.mkdir(base, { recursive: true });
   await fs.mkdir(jsonDir, { recursive: true });
+  await fs.mkdir(pianoJsonDir, { recursive: true });
   await fs.mkdir(exportsDir, { recursive: true });
 
   try {
@@ -52,6 +55,23 @@ async function ensureRuntimeLibrary() {
     const seed = await fs.readFile(dbExamplePath(), "utf8");
     await fs.writeFile(dbPath, seed, "utf8");
   }
+  try {
+    await fs.access(pianoDbPath);
+  } catch {
+    await fs.writeFile(pianoDbPath, `${JSON.stringify({ songs: [], collections: [], songCollection: [], tags: [], songTags: [], practiceMeta: [], updatedAt: new Date().toISOString() }, null, 2)}\n`, "utf8");
+  }
+}
+
+async function localLibraryJsonFiles() {
+  const files = new Map();
+  for (const directoryName of ["json", "jsonpiano"]) {
+    const directory = path.join(runtimeLibraryDir(), directoryName);
+    for (const fileName of await fs.readdir(directory)) {
+      if (!fileName.toLowerCase().endsWith(".json") || path.basename(fileName) !== fileName) continue;
+      if (!files.has(fileName)) files.set(fileName, path.join(directory, fileName));
+    }
+  }
+  return files;
 }
 
 async function readJsonFilesRecursive(rootDir, limit = 5000) {
@@ -222,9 +242,13 @@ ipcMain.handle("library:save-json-export", async (_, bytes, suggestedName) => {
 
   const targetPath = path.resolve(selected.filePath);
   const libraryJsonDir = path.resolve(runtimeLibraryDir(), "json");
+  const libraryPianoJsonDir = path.resolve(runtimeLibraryDir(), "jsonpiano");
   const relativeToLibrary = path.relative(libraryJsonDir, targetPath);
-  if (relativeToLibrary === "" || (!relativeToLibrary.startsWith("..") && !path.isAbsolute(relativeToLibrary))) {
-    throw new Error("Scegli una destinazione diversa dalla cartella library\\json: contiene i file originali della libreria.");
+  const relativeToPianoLibrary = path.relative(libraryPianoJsonDir, targetPath);
+  const insideFullLibrary = relativeToLibrary === "" || (!relativeToLibrary.startsWith("..") && !path.isAbsolute(relativeToLibrary));
+  const insidePianoLibrary = relativeToPianoLibrary === "" || (!relativeToPianoLibrary.startsWith("..") && !path.isAbsolute(relativeToPianoLibrary));
+  if (insideFullLibrary || insidePianoLibrary) {
+    throw new Error("Scegli una destinazione diversa dalle cartelle library\\json e library\\jsonpiano: contengono i file originali delle librerie.");
   }
 
   const data = Buffer.from(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []));
@@ -273,12 +297,11 @@ ipcMain.handle("quest:pull-json", async () => {
 
 ipcMain.handle("quest:preview-push", async () => {
   const serial = await getQuestDevice();
-  const localDir = path.join(runtimeLibraryDir(), "json");
-  const localNames = (await fs.readdir(localDir)).filter((name) => name.toLowerCase().endsWith(".json") && path.basename(name) === name);
+  const localFiles = await localLibraryJsonFiles();
   const remoteMap = new Map((await remoteQuestFiles(serial)).map((item) => [item.fileName, item.hash]));
   const files = [];
-  for (const fileName of localNames) {
-    const hash = await sha256File(path.join(localDir, fileName));
+  for (const [fileName, localPath] of localFiles) {
+    const hash = await sha256File(localPath);
     const remoteHash = remoteMap.get(fileName) || "";
     files.push({ fileName, status: !remoteHash ? "new" : remoteHash === hash ? "same" : "changed" });
   }
@@ -298,7 +321,7 @@ ipcMain.handle("quest:push-json", async (_, requestedNames) => {
   const serial = await getQuestDevice();
   const names = Array.isArray(requestedNames) ? [...new Set(requestedNames)] : [];
   if (names.length === 0 || names.length > 5000) throw new Error("Selezione file non valida");
-  const localDir = path.join(runtimeLibraryDir(), "json");
+  const localFiles = await localLibraryJsonFiles();
   await runAdb(["-s", serial, "shell", "mkdir", "-p", QUEST_JSON_DIR]);
   let copied = 0;
   const errors = [];
@@ -308,8 +331,8 @@ ipcMain.handle("quest:push-json", async (_, requestedNames) => {
       continue;
     }
     try {
-      const localPath = path.join(localDir, fileName);
-      await fs.access(localPath);
+      const localPath = localFiles.get(fileName);
+      if (!localPath) throw new Error("File non trovato nella libreria completa o piano");
       await runAdb(["-s", serial, "push", localPath, `${QUEST_JSON_DIR}/${fileName}`]);
       copied += 1;
     } catch (error) {

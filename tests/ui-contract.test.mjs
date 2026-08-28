@@ -59,7 +59,7 @@ test("desktop JSON export refuses to write inside the live library JSON folder",
   const main = await fs.readFile(path.join(root, "electron", "main.cjs"), "utf8");
   assert.equal(main.includes('ipcMain.handle("library:save-json-export"'), true);
   assert.equal(main.includes('path.relative(libraryJsonDir, targetPath)'), true);
-  assert.equal(main.includes('diversa dalla cartella library\\\\json'), true);
+  assert.equal(main.includes('diversa dalle cartelle library\\\\json e library\\\\jsonpiano'), true);
 });
 
 test("visualizer export rebuilds PianoVision tracks from selected instruments", async () => {
