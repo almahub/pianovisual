@@ -183,6 +183,7 @@ const el = {
   selectVisibleBtn: document.getElementById("selectVisibleBtn"),
   clearSelectionBtn: document.getElementById("clearSelectionBtn"),
   downloadSelectedBtn: document.getElementById("downloadSelectedBtn"),
+  convertSelectedPianoBtn: document.getElementById("convertSelectedPianoBtn"),
   deleteSelectedBtn: document.getElementById("deleteSelectedBtn"),
   selectAllPageCheckbox: document.getElementById("selectAllPageCheckbox"),
 
@@ -1605,6 +1606,7 @@ function renderViewLabels() {
   el.smartPlaylistsSection.classList.toggle("hidden", state.view !== "home");
   const libraryOnly = state.view === "library" || state.view === "reductions";
   el.libraryToolbar?.classList.toggle("hidden", !libraryOnly);
+  el.convertSelectedPianoBtn?.classList.toggle("hidden", state.view !== "library");
   el.searchWrap.classList.toggle("hidden", !libraryOnly);
   el.filterPanel.classList.toggle("hidden", !libraryOnly);
   el.detailPanel.classList.toggle("hidden", !libraryOnly);
@@ -1746,6 +1748,80 @@ async function createPianoReduction() {
   } finally {
     if (el.createPianoReductionBtn) el.createPianoReductionBtn.disabled = false;
     showLoading(false);
+  }
+}
+
+async function createSelectedPianoReductions() {
+  const selectedSongs = (state.db?.songs || []).filter(
+    (song) => state.selectedSongIds.has(song.id) && song.variantType !== "piano_reduction",
+  );
+  if (selectedSongs.length === 0) {
+    toast("Seleziona almeno un brano completo dalla libreria", "error");
+    return;
+  }
+
+  const existingSourceIds = new Set(
+    (state.db?.songs || [])
+      .filter((song) => song.variantType === "piano_reduction" && song.derivedFromSongId)
+      .map((song) => song.derivedFromSongId),
+  );
+  const pending = selectedSongs.filter((song) => !existingSourceIds.has(song.id));
+  const alreadyConverted = selectedSongs.length - pending.length;
+  if (pending.length === 0) {
+    toast("Tutti i brani selezionati hanno già una versione piano", "ok");
+    return;
+  }
+
+  const skippedMessage = alreadyConverted > 0 ? `\n${alreadyConverted} già convertiti saranno saltati.` : "";
+  if (!confirm(`Convertire ${pending.length} ${pending.length === 1 ? "brano" : "brani"} in versione piano?${skippedMessage}\n\nI brani completi resteranno invariati.`)) return;
+
+  showLoading(true);
+  const created = [];
+  const errors = [];
+  if (el.convertSelectedPianoBtn) el.convertSelectedPianoBtn.disabled = true;
+  try {
+    for (let index = 0; index < pending.length; index += 1) {
+      const song = pending[index];
+      if (el.convertSelectedPianoBtn) {
+        el.convertSelectedPianoBtn.textContent = `Conversione ${index + 1}/${pending.length}…`;
+      }
+      try {
+        const result = await api("/api/piano-reduction/create", {
+          method: "POST",
+          body: JSON.stringify({ songId: song.id }),
+        });
+        created.push({ sourceSongId: song.id, sourceTitle: song.title, song: result.song, summary: result.summary });
+      } catch (error) {
+        errors.push({ sourceSongId: song.id, sourceTitle: song.title, error: error.message });
+      }
+    }
+
+    setLastImportReport({
+      kind: "piano-reduction-batch",
+      createdAt: new Date().toISOString(),
+      summary: { selected: selectedSongs.length, created: created.length, alreadyConverted, errors: errors.length },
+      created,
+      errors,
+    });
+    state.selectedSongIds.clear();
+    await refreshDb();
+    if (created.length > 0) {
+      state.selectedSongId = created.at(-1).song.id;
+      selectNav("reductions");
+    } else {
+      render();
+    }
+
+    const parts = [`${created.length} ${created.length === 1 ? "riduzione creata" : "riduzioni create"}`];
+    if (alreadyConverted > 0) parts.push(`${alreadyConverted} già presenti`);
+    if (errors.length > 0) parts.push(`${errors.length} errori`);
+    toast(parts.join(" · "), errors.length > 0 ? "error" : "ok");
+  } finally {
+    if (el.convertSelectedPianoBtn) {
+      el.convertSelectedPianoBtn.textContent = "Converti selezionati in piano";
+    }
+    showLoading(false);
+    updateSelectionInfo();
   }
 }
 
@@ -3411,12 +3487,21 @@ function downloadLastImportReport() {
 
 function updateSelectionInfo() {
   const n = state.selectedSongIds.size;
+  const pianoEligibleCount = (state.db?.songs || []).filter(
+    (song) => state.selectedSongIds.has(song.id) && song.variantType !== "piano_reduction",
+  ).length;
   const base = el.playlistCount.textContent || "";
   const cleanBase = base.replace(/\s+\|\s+Selezionati:\s+\d+$/, "");
   el.playlistCount.textContent = `${cleanBase} | Selezionati: ${n}`;
   if (el.deleteSelectedBtn) {
     el.deleteSelectedBtn.disabled = n === 0;
     el.deleteSelectedBtn.textContent = n > 0 ? `Elimina selezionati (${n})` : "Elimina selezionati";
+  }
+  if (el.convertSelectedPianoBtn) {
+    el.convertSelectedPianoBtn.disabled = pianoEligibleCount === 0;
+    el.convertSelectedPianoBtn.textContent = pianoEligibleCount > 0
+      ? `Converti in piano (${pianoEligibleCount})`
+      : "Converti selezionati in piano";
   }
 }
 
@@ -3982,6 +4067,7 @@ function bindEvents() {
   el.selectVisibleBtn.addEventListener("click", selectVisibleSongs);
   el.clearSelectionBtn.addEventListener("click", clearSelectedSongs);
   el.downloadSelectedBtn.addEventListener("click", downloadSelectedSongsJson);
+  el.convertSelectedPianoBtn.addEventListener("click", createSelectedPianoReductions);
   el.deleteSelectedBtn.addEventListener("click", deleteSelectedSongs);
   el.selectAllPageCheckbox.addEventListener("change", () => {
     const rows = currentPageRows();

@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.21] - 2026-08-28
+### Added
+- Conversione multipla in Piano Lab dei brani selezionati nella libreria completa.
+- Avanzamento della coda e report finale con riduzioni create, brani già presenti ed eventuali errori.
+
+### Changed
+- Le conversioni multiple vengono elaborate una alla volta per mantenere stabile il computer e lasciare invariati i brani originali.
+
 ## [1.0.20] - 2026-08-28
 ### Added
 - Libreria fisica dedicata ai brani piano in `library/jsonpiano`, indicizzata separatamente da `library/dbpiano.json`.
