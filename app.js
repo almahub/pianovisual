@@ -1751,6 +1751,41 @@ async function createPianoReduction() {
   }
 }
 
+function pianoSourceIdentityKeys(song) {
+  const keys = [];
+  const jsonHash = String(song?.jsonContentHash || "").trim();
+  const fileHash = String(song?.fileHash || "").trim();
+  if (jsonHash) keys.push(`json:${jsonHash}`);
+  if (fileHash) keys.push(`file:${fileHash}`);
+
+  const title = normalizeText(song?.title);
+  const artist = normalizeText(song?.artist || song?.composer);
+  if (title && artist) keys.push(`metadata:${title}\0${artist}`);
+  else if (title) {
+    const duration = Math.round(Number(song?.duration || 0));
+    const bpm = Math.round(Number(song?.bpm || 0));
+    if (duration > 0) keys.push(`metadata:${title}\0${duration}\0${bpm}`);
+  }
+  return keys;
+}
+
+function deduplicatePianoSources(songs) {
+  const unique = [];
+  const duplicates = [];
+  const ownerByKey = new Map();
+  for (const song of songs) {
+    const keys = pianoSourceIdentityKeys(song);
+    const original = keys.map((key) => ownerByKey.get(key)).find(Boolean);
+    if (original) {
+      duplicates.push({ song, original });
+      continue;
+    }
+    unique.push(song);
+    for (const key of keys) ownerByKey.set(key, song);
+  }
+  return { unique, duplicates };
+}
+
 async function createSelectedPianoReductions() {
   const selectedSongs = (state.db?.songs || []).filter(
     (song) => state.selectedSongIds.has(song.id) && song.variantType !== "piano_reduction",
@@ -1760,20 +1795,41 @@ async function createSelectedPianoReductions() {
     return;
   }
 
-  const existingSourceIds = new Set(
+  const { unique: uniqueSelectedSongs, duplicates } = deduplicatePianoSources(selectedSongs);
+  const completeSongsById = new Map(
     (state.db?.songs || [])
-      .filter((song) => song.variantType === "piano_reduction" && song.derivedFromSongId)
-      .map((song) => song.derivedFromSongId),
+      .filter((song) => song.variantType !== "piano_reduction")
+      .map((song) => [song.id, song]),
   );
-  const pending = selectedSongs.filter((song) => !existingSourceIds.has(song.id));
-  const alreadyConverted = selectedSongs.length - pending.length;
+  const convertedSourceKeys = new Set();
+  const existingSourceIds = new Set();
+  for (const reduction of (state.db?.songs || []).filter((song) => song.variantType === "piano_reduction")) {
+    if (!reduction.derivedFromSongId) continue;
+    existingSourceIds.add(reduction.derivedFromSongId);
+    const source = completeSongsById.get(reduction.derivedFromSongId);
+    for (const key of pianoSourceIdentityKeys(source)) convertedSourceKeys.add(key);
+  }
+  const isAlreadyConverted = (song) =>
+    existingSourceIds.has(song.id) || pianoSourceIdentityKeys(song).some((key) => convertedSourceKeys.has(key));
+  const pending = uniqueSelectedSongs.filter((song) => !isAlreadyConverted(song));
+  const alreadyConverted = uniqueSelectedSongs.length - pending.length;
   if (pending.length === 0) {
-    toast("Tutti i brani selezionati hanno già una versione piano", "ok");
+    const duplicateNote = duplicates.length > 0 ? `\n\nRilevate anche ${duplicates.length} copie dello stesso brano.` : "";
+    alert(`Tutti i brani selezionati hanno già una versione piano.${duplicateNote}`);
     return;
   }
 
   const skippedMessage = alreadyConverted > 0 ? `\n${alreadyConverted} già convertiti saranno saltati.` : "";
-  if (!confirm(`Convertire ${pending.length} ${pending.length === 1 ? "brano" : "brani"} in versione piano?${skippedMessage}\n\nI brani completi resteranno invariati.`)) return;
+  let duplicateMessage = "";
+  if (duplicates.length > 0) {
+    const details = duplicates
+      .slice(0, 8)
+      .map(({ song, original }) => `• “${song.title || "Senza titolo"}” è una copia di “${original.title || "Senza titolo"}”`)
+      .join("\n");
+    const remaining = duplicates.length > 8 ? `\n…e altre ${duplicates.length - 8} copie.` : "";
+    duplicateMessage = `\n\nATTENZIONE: rilevate ${duplicates.length} ${duplicates.length === 1 ? "copia doppia" : "copie doppie"}. Verrà convertita una sola copia per brano.\n${details}${remaining}`;
+  }
+  if (!confirm(`Convertire ${pending.length} ${pending.length === 1 ? "brano" : "brani"} in versione piano?${skippedMessage}${duplicateMessage}\n\nI brani completi resteranno invariati.`)) return;
 
   showLoading(true);
   const created = [];
@@ -1799,7 +1855,19 @@ async function createSelectedPianoReductions() {
     setLastImportReport({
       kind: "piano-reduction-batch",
       createdAt: new Date().toISOString(),
-      summary: { selected: selectedSongs.length, created: created.length, alreadyConverted, errors: errors.length },
+      summary: {
+        selected: selectedSongs.length,
+        created: created.length,
+        alreadyConverted,
+        duplicateCopies: duplicates.length,
+        errors: errors.length,
+      },
+      duplicates: duplicates.map(({ song, original }) => ({
+        skippedSongId: song.id,
+        skippedTitle: song.title,
+        originalSongId: original.id,
+        originalTitle: original.title,
+      })),
       created,
       errors,
     });
@@ -1814,6 +1882,7 @@ async function createSelectedPianoReductions() {
 
     const parts = [`${created.length} ${created.length === 1 ? "riduzione creata" : "riduzioni create"}`];
     if (alreadyConverted > 0) parts.push(`${alreadyConverted} già presenti`);
+    if (duplicates.length > 0) parts.push(`${duplicates.length} copie saltate`);
     if (errors.length > 0) parts.push(`${errors.length} errori`);
     toast(parts.join(" · "), errors.length > 0 ? "error" : "ok");
   } finally {

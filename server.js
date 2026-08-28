@@ -372,6 +372,31 @@ function normalizeText(value) {
     .trim();
 }
 
+function areSourceSongsEquivalent(first, second) {
+  if (!first || !second) return false;
+  if (first.id && first.id === second.id) return true;
+  const firstJsonHash = String(first.jsonContentHash || "").trim();
+  const secondJsonHash = String(second.jsonContentHash || "").trim();
+  if (firstJsonHash && firstJsonHash === secondJsonHash) return true;
+  const firstFileHash = String(first.fileHash || "").trim();
+  const secondFileHash = String(second.fileHash || "").trim();
+  if (firstFileHash && firstFileHash === secondFileHash) return true;
+
+  const firstTitle = normalizeText(first.title);
+  const secondTitle = normalizeText(second.title);
+  const firstArtist = normalizeText(first.artist || first.composer);
+  const secondArtist = normalizeText(second.artist || second.composer);
+  if (firstTitle && firstTitle === secondTitle && firstArtist && firstArtist === secondArtist) return true;
+  if (!firstArtist && !secondArtist && firstTitle && firstTitle === secondTitle) {
+    const firstDuration = Math.round(Number(first.duration || 0));
+    const secondDuration = Math.round(Number(second.duration || 0));
+    const firstBpm = Math.round(Number(first.bpm || 0));
+    const secondBpm = Math.round(Number(second.bpm || 0));
+    return firstDuration > 0 && firstDuration === secondDuration && firstBpm === secondBpm;
+  }
+  return false;
+}
+
 function mojibakeScore(value) {
   return (String(value || "").match(/[ÐÑÃÂ�]/g) || []).length;
 }
@@ -850,7 +875,14 @@ async function handleApi(req, res, url) {
       sendJson(res, 400, { error: "Il brano selezionato è già una riduzione pianistica" });
       return true;
     }
-    const existing = db.songs.find((song) => song.variantType === "piano_reduction" && song.derivedFromSongId === sourceSong.id);
+    const equivalentSourceIds = new Set(
+      db.songs
+        .filter((song) => song.variantType !== "piano_reduction" && areSourceSongsEquivalent(song, sourceSong))
+        .map((song) => song.id),
+    );
+    const existing = db.songs.find(
+      (song) => song.variantType === "piano_reduction" && equivalentSourceIds.has(song.derivedFromSongId),
+    );
     if (existing && payload.replaceExisting !== true) {
       sendJson(res, 409, { error: "Esiste già una riduzione di questo brano", existingSongId: existing.id });
       return true;

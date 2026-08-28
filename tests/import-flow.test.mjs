@@ -375,6 +375,34 @@ test('existing piano reductions migrate from json and db.json to the dedicated l
   assert.equal((JSON.parse(await fs.readFile(pianoDbPath, 'utf8'))).songs.length, 1);
 });
 
+test('Piano Lab refuses a second reduction made from a duplicate source song', async () => {
+  const imported = await api('/api/library/import-json-archive', {
+    method: 'POST',
+    body: JSON.stringify({ items: [{ fileName: 'duplicate-source.json', jsonData: makeCompatiblePianoVisionJson() }] }),
+  });
+  const original = imported.songs[0];
+  const originalFileName = path.basename(original.jsonPath);
+  const copyFileName = 'duplicate-source-copy.json';
+  await fs.copyFile(path.join(jsonDir, originalFileName), path.join(jsonDir, copyFileName));
+
+  const storedDb = JSON.parse(await fs.readFile(dbPath, 'utf8'));
+  const copy = { ...storedDb.songs[0], id: 'song-duplicate-copy', sourceFileName: copyFileName, jsonPath: `/library/json/${copyFileName}` };
+  storedDb.songs.push(copy);
+  storedDb.practiceMeta.push({ songId: copy.id, lastPracticePointSec: 0, playbackSpeed: 1, favoriteLoops: [], studyStatus: 'to_study' });
+  await fs.writeFile(dbPath, JSON.stringify(storedDb, null, 2) + '\n', 'utf8');
+
+  await api('/api/piano-reduction/create', {
+    method: 'POST',
+    body: JSON.stringify({ songId: original.id }),
+  });
+  await assert.rejects(
+    api('/api/piano-reduction/create', { method: 'POST', body: JSON.stringify({ songId: copy.id }) }),
+    /409.*Esiste già una riduzione/,
+  );
+  const merged = await api('/api/library');
+  assert.equal(merged.songs.filter((song) => song.variantType === 'piano_reduction').length, 1);
+});
+
 test('import-json-archive overwrite duplicate updates metadata', async () => {
   const first = {
     fileName: 'arch-a.json',

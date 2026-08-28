@@ -86,6 +86,9 @@ test("desktop package includes and unpacks the local piano reduction engine", as
 test("library selection supports queued piano reductions", async () => {
   const app = await fs.readFile(path.join(root, "app.js"), "utf8");
   assert.equal(app.includes("async function createSelectedPianoReductions()"), true);
+  assert.equal(app.includes("function deduplicatePianoSources(songs)"), true);
+  assert.equal(app.includes("ATTENZIONE: rilevate"), true);
+  assert.equal(app.includes("copie saltate"), true);
   assert.equal(app.includes('kind: "piano-reduction-batch"'), true);
   assert.equal(app.includes('el.convertSelectedPianoBtn.addEventListener("click", createSelectedPianoReductions)'), true);
 });
