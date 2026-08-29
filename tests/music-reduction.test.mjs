@@ -45,3 +45,35 @@ test("piano harmony and bass stay aligned with the detected chords", async () =>
     await fs.rm(tempDir, { recursive: true, force: true });
   }
 });
+
+test("a melody-only selection is not duplicated into harmony or left hand", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pianovisual-melody-test-"));
+  const input = path.join(tempDir, "melody.json");
+  const output = path.join(tempDir, "reduction.json");
+  try {
+    await fs.writeFile(input, JSON.stringify({
+      title: "Solo melody",
+      musicalInfo: { tempo: 120, meter: [4, 4], ppq: 480 },
+      tracks: [{ name: "Lead", notes: [
+        { midi: 72, time: 0, duration: 0.5 },
+        { midi: 74, time: 0.5, duration: 0.5 },
+      ] }],
+    }), "utf8");
+    await execFileAsync("python3", [
+      path.join(root, "skill/music-to-piano-json/scripts/convert.py"),
+      input,
+      "-o",
+      output,
+      "--format",
+      "normalized",
+    ]);
+    const reduction = JSON.parse(await fs.readFile(output, "utf8"));
+    const tracks = Object.fromEntries(reduction.tracks.map((track) => [track.role, track.notes]));
+    assert.equal(tracks.melody.length, 2);
+    assert.equal(tracks.harmony.length, 0);
+    assert.equal(tracks.bass.length, 0);
+    assert.equal(reduction.chords.length, 0);
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});

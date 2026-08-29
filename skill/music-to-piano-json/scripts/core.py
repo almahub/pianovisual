@@ -268,9 +268,13 @@ def reduce(tracks,info,chords=None,classification=None):
     mi,hi,bi,fs=classification or classify(tracks); melody=[dict(n) for n in tracks[mi]['notes']]
     # A reduction must remain playable: use the strongest harmonic source instead
     # of stacking every orchestral accompaniment track into one piano hand.
-    source_h=[dict(n) for n in tracks[hi]['notes']]
+    source_h=[] if len(tracks)==1 else [dict(n) for n in tracks[hi]['notes']]
+    source_b=[] if len(tracks)==1 else [dict(n) for n in tracks[bi]['notes']]
+    if hi==bi and len(tracks)>1:
+        source_h=[n for n in source_h if n['midi']>=48]
+        source_b=[n for n in source_b if n['midi']<60]
     harmony=_align_notes_to_chords(source_h,chords or [],48,72,melody)
-    bass=_align_notes_to_chords(tracks[bi]['notes'],chords or [],36,60)
+    bass=_align_notes_to_chords(source_b,chords or [],36,60)
     return [
       {'id':'melody','name':'Melodia','role':'melody','hand':'right','instrument':'piano','confidence':round(fs[mi]['melody'],3),'notes':melody},
       {'id':'harmony','name':'Armonia pianistica','role':'harmony','hand':'right','instrument':'piano','confidence':round(fs[hi]['harmony'],3),'notes':harmony},
@@ -310,8 +314,8 @@ def build(path,start=0,end=None,title=None,artist=None):
     tracks,info=crop(tracks,info,start,end); tracks=[t for t in tracks if t['notes']]
     if not tracks:raise ValueError('Selected interval contains no notes')
     classification=classify(tracks);melody_index=classification[0]
-    harmonic_tracks=[track for index,track in enumerate(tracks) if index!=melody_index] or tracks
-    chords=infer_chords(harmonic_tracks,info); reduced=reduce(tracks,info,chords,classification)
+    harmonic_tracks=[track for index,track in enumerate(tracks) if index!=melody_index]
+    chords=infer_chords(harmonic_tracks,info) if harmonic_tracks else []; reduced=reduce(tracks,info,chords,classification)
     return {'format':'piano_reduction_v2','title':title or info.pop('title',Path(path).stem),'artist':artist if artist is not None else info.pop('artist',''),
       'source':{'filename':Path(path).name,'type':kind,'analysis_mode':'structured','confidence':1.0},'musicalInfo':info,
       'sections':sections(chords,info),'chords':chords,'tracks':reduced}

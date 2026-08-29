@@ -564,6 +564,17 @@ textarea {
   color: #fff;
 }
 
+.viz-export-actions {
+  display: grid;
+  gap: 7px;
+  flex: 0 0 auto;
+  min-width: 150px;
+}
+
+.viz-export-actions .btn {
+  width: 100%;
+}
+
 .piano-origin {
   color: #cbb5ff;
 }

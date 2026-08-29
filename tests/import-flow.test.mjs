@@ -348,6 +348,32 @@ test('Piano Lab creates a separate compatible reduction linked to the full song'
   assert.equal(reduced.tracksV2.left.length, reduced.measures.length);
 });
 
+test('Visualizer selection can be reduced and stored directly in Piano Lab', async () => {
+  const sourceJson = makeCompatiblePianoVisionJson();
+  const imported = await api('/api/library/import-json-archive', {
+    method: 'POST',
+    body: JSON.stringify({ items: [{ fileName: 'visual-selection.json', jsonData: sourceJson }] }),
+  });
+  const filtered = structuredClone(sourceJson);
+  filtered.original.tracks = [sourceJson.original.tracks[0], sourceJson.original.tracks[2]];
+  filtered.supportingTracks = [sourceJson.supportingTracks[0], sourceJson.supportingTracks[2]];
+  filtered.accompanyingInstruments = [sourceJson.accompanyingInstruments[0], sourceJson.accompanyingInstruments[2]];
+  filtered.accompanyingChannels = [sourceJson.accompanyingChannels[0], sourceJson.accompanyingChannels[2]];
+
+  const result = await api('/api/piano-reduction/create', {
+    method: 'POST',
+    body: JSON.stringify({
+      songId: imported.songs[0].id,
+      sourceJson: filtered,
+      selectedInstruments: ['Lead', 'Bass'],
+    }),
+  });
+  assert.deepEqual(result.song.reductionSourceInstruments, ['Lead', 'Bass']);
+  const reduced = JSON.parse(await fs.readFile(path.join(pianoJsonDir, path.basename(result.song.jsonPath)), 'utf8'));
+  assert.equal(reduced.original.tracks.length, 2);
+  assert.deepEqual(reduced.original.tracks.map((track) => track.name), ['Lead', 'Bass']);
+});
+
 test('existing piano reductions migrate from json and db.json to the dedicated library', async () => {
   const legacyFileName = 'legacy-song-piano.json';
   await fs.writeFile(path.join(jsonDir, legacyFileName), JSON.stringify(makeCompatiblePianoVisionJson(), null, 2) + '\n', 'utf8');

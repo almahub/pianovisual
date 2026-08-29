@@ -31,6 +31,7 @@ The scripts use only Python's standard library. They accept `.json`, `.mid`, `.m
 - Infer chord identity from accompaniment and bass after excluding the detected melody, so passing melody tones do not create false chord extensions.
 - Split harmony and bass notes at chord boundaries when necessary and keep their pitch classes inside the active chord; melody may retain intentional non-chord tones.
 - Produce logical `melody`, `harmony`, and `bass` tracks. Melody and harmony normally use the right hand; bass uses the left.
+- When the user selects only a melodic source, keep harmony and bass empty instead of duplicating the melody into missing hands. With a shared accompaniment source, separate middle-register harmony from low-register bass.
 - Avoid harmony notes within three semitones below or one semitone above a simultaneous melody note. Keep accompaniment approximately C3-C5 and bass approximately C2-C4 by octave displacement.
 - Preserve structured timing. If an input has no reliable beat grid, omit unsupported measure/beat fields instead of inventing them.
 - Infer sections from repeated bar-level harmonic, melodic, rhythmic, bass, and density fingerprints. Use `family` for related repetitions. Use generic `section` when verse/chorus evidence is weak.

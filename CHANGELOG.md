@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.23] - 2026-08-29
+### Added
+- Pulsante `Esporta su Piano` sotto l’export del Visualizer per creare una riduzione usando soltanto le tracce attive.
+- Sostituzione confermata della riduzione esistente quando si esporta nuovamente lo stesso brano verso Piano Lab.
+
+### Changed
+- Una selezione contenente soltanto la melodia lascia vuote armonia e mano sinistra invece di duplicare note inesistenti.
+- I BPM nella tabella dei brani sono visualizzati con due cifre decimali.
+
 ## [1.0.22] - 2026-08-29
 ### Added
 - Avviso prima della conversione multipla quando la selezione contiene copie dello stesso brano.

@@ -32,6 +32,7 @@ test("ui critical controls exist for key workflows", async () => {
     "questPullBtn",
     "questPushBtn",
     "exportVisualizerSelectionBtn",
+    "exportVisualizerToPianoBtn",
     "downloadImportReportBtn",
     "archiveConflictPolicySelect",
     "archiveDedupPolicySelect",
@@ -68,6 +69,16 @@ test("visualizer export rebuilds PianoVision tracks from selected instruments", 
   assert.equal(app.includes("clone.tracksV2 = buildTracksV2(clone.original.tracks"), true);
   assert.equal(app.includes("clone.song_length = Math.max(0, filteredDuration)"), true);
   assert.equal(app.includes("filteredByInstruments"), true);
+  assert.equal(app.includes("async function exportVisualizerSelectionToPiano()"), true);
+  assert.equal(app.includes("sourceJson: filtered"), true);
+  assert.equal(app.includes('el.exportVisualizerToPianoBtn.addEventListener("click", exportVisualizerSelectionToPiano)'), true);
+});
+
+test("library BPM values are formatted with two decimals", async () => {
+  const app = await fs.readFile(path.join(root, "app.js"), "utf8");
+  assert.equal(app.includes("function formatTableBpm(value)"), true);
+  assert.equal(app.includes("bpm.toFixed(2)"), true);
+  assert.equal(app.includes("formatTableBpm(song.bpm)"), true);
 });
 
 test("instrument toggles update the loaded count and scheduled audio", async () => {

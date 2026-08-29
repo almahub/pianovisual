@@ -898,7 +898,19 @@ async function handleApi(req, res, url) {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pianovisual-piano-"));
     const outputPath = path.join(tempDir, "reduction.json");
     try {
-      const engineResult = await runPianoReduction(sourcePath, outputPath);
+      let reductionSourcePath = sourcePath;
+      if (payload.sourceJson !== undefined) {
+        if (!payload.sourceJson || typeof payload.sourceJson !== "object" || Array.isArray(payload.sourceJson)) {
+          throw new Error("JSON delle tracce selezionate non valido");
+        }
+        const sourceValidation = validatePianoVisionJsonData(payload.sourceJson);
+        if (!sourceValidation.ok) {
+          throw new Error(`JSON delle tracce selezionate non valido: ${sourceValidation.errors.join(", ")}`);
+        }
+        reductionSourcePath = path.join(tempDir, "selected-tracks.json");
+        await writeJsonAtomic(reductionSourcePath, payload.sourceJson);
+      }
+      const engineResult = await runPianoReduction(reductionSourcePath, outputPath);
       const reducedJson = JSON.parse(await fs.readFile(outputPath, "utf8"));
       const validation = validatePianoVisionJsonData(reducedJson);
       if (!validation.ok) throw new Error(`JSON ridotto non valido: ${validation.errors.join(", ")}`);
@@ -950,6 +962,9 @@ async function handleApi(req, res, url) {
         variantType: "piano_reduction",
         derivedFromSongId: sourceSong.id,
         reductionEngine: "music-to-piano-json",
+        reductionSourceInstruments: Array.isArray(payload.selectedInstruments)
+          ? payload.selectedInstruments.slice(0, 128).map((name) => String(name || "").trim()).filter(Boolean)
+          : [],
       });
       applySmartMembership(db, reductionSong);
       await writeDb(db);

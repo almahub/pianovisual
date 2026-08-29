@@ -145,6 +145,7 @@ const el = {
   visualizerCanvas: document.getElementById("visualizerCanvas"),
   visualizerLegend: document.getElementById("visualizerLegend"),
   exportVisualizerSelectionBtn: document.getElementById("exportVisualizerSelectionBtn"),
+  exportVisualizerToPianoBtn: document.getElementById("exportVisualizerToPianoBtn"),
   pianoReductionCta: document.getElementById("pianoReductionCta"),
   createPianoReductionBtn: document.getElementById("createPianoReductionBtn"),
   footerTrackTitle: document.getElementById("footerTrackTitle"),
@@ -779,6 +780,11 @@ function secondsToClock(seconds) {
   return `${m}:${String(r).padStart(2, "0")}`;
 }
 
+function formatTableBpm(value) {
+  const bpm = Number(value);
+  return Number.isFinite(bpm) && bpm > 0 ? bpm.toFixed(2) : "-";
+}
+
 function clamp01(value) {
   return Math.max(0, Math.min(1, value));
 }
@@ -1360,7 +1366,7 @@ function renderTable() {
             </div>
           </td>
           <td>${escapeHtml(song.artist || "-")}</td>
-          <td>${escapeHtml(song.bpm || "-")}</td>
+          <td>${escapeHtml(formatTableBpm(song.bpm))}</td>
           <td>${escapeHtml(song.key || "-")}</td>
           <td>${secondsToClock(song.duration || 0)}</td>
           <td>${new Date(song.importedAt).toLocaleDateString("it-IT")}</td>
@@ -1629,6 +1635,10 @@ function renderDetail() {
       el.exportVisualizerSelectionBtn.textContent = "Esporta strumenti selezionati";
       el.exportVisualizerSelectionBtn.disabled = true;
     }
+    if (el.exportVisualizerToPianoBtn) {
+      el.exportVisualizerToPianoBtn.disabled = true;
+      el.exportVisualizerToPianoBtn.classList.add("hidden");
+    }
     if (el.footerTrackTitle) el.footerTrackTitle.textContent = "Nessun brano";
     if (el.footerTrackArtist) el.footerTrackArtist.textContent = "-";
     return;
@@ -1652,6 +1662,10 @@ function renderDetail() {
   if (el.exportVisualizerSelectionBtn) {
     el.exportVisualizerSelectionBtn.textContent = `Esporta ${activeCount} ${activeCount === 1 ? "strumento" : "strumenti"}`;
     el.exportVisualizerSelectionBtn.disabled = activeCount === 0;
+  }
+  if (el.exportVisualizerToPianoBtn) {
+    el.exportVisualizerToPianoBtn.disabled = activeCount === 0;
+    el.exportVisualizerToPianoBtn.classList.toggle("hidden", song.variantType === "piano_reduction");
   }
 
   el.detailMeta.innerHTML = [
@@ -2681,7 +2695,7 @@ function trackInstrumentNameFromJson(jsonData, song, idx) {
   return `Track ${idx + 1}`;
 }
 
-function filterJsonByActiveInstruments(jsonData, song, activeInstruments) {
+function filterJsonByActiveInstruments(jsonData, song, activeInstruments, includeAuditFields = true) {
   const activeSet = new Set((activeInstruments || []).map((x) => String(x || "").trim()).filter(Boolean));
   const clone = JSON.parse(JSON.stringify(jsonData || {}));
   const originalTracks = Array.isArray(clone?.original?.tracks) ? clone.original.tracks : [];
@@ -2740,8 +2754,10 @@ function filterJsonByActiveInstruments(jsonData, song, activeInstruments) {
     0,
   );
   clone.song_length = Math.max(0, filteredDuration);
-  clone.filteredByInstruments = [...activeSet];
-  clone.filteredAt = new Date().toISOString();
+  if (includeAuditFields) {
+    clone.filteredByInstruments = [...activeSet];
+    clone.filteredAt = new Date().toISOString();
+  }
 
   return clone;
 }
@@ -2774,6 +2790,53 @@ async function exportFilteredSongJson() {
   } catch (error) {
     toast(error.message, "error");
   } finally {
+    showLoading(false);
+  }
+}
+
+async function exportVisualizerSelectionToPiano() {
+  const song = getSongById(state.selectedSongId);
+  if (!song || song.variantType === "piano_reduction") {
+    toast("Seleziona un brano completo", "error");
+    return;
+  }
+  const fallback = instrumentsForSong(song);
+  const active = (state.player.activeInstrumentsBySong[song.id] || fallback).filter(Boolean);
+  if (active.length === 0) {
+    toast("Nessuno strumento attivo da esportare", "error");
+    return;
+  }
+
+  const existing = (state.db?.songs || []).find(
+    (item) => item.variantType === "piano_reduction" && item.derivedFromSongId === song.id,
+  );
+  const replaceMessage = existing ? "\n\nLa riduzione piano esistente verrà sostituita." : "";
+  if (!confirm(`Creare la riduzione piano usando ${active.length} ${active.length === 1 ? "traccia selezionata" : "tracce selezionate"}?${replaceMessage}`)) return;
+
+  showLoading(true);
+  if (el.exportVisualizerToPianoBtn) el.exportVisualizerToPianoBtn.disabled = true;
+  try {
+    const response = await fetch(song.jsonPath);
+    if (!response.ok) throw new Error("Impossibile leggere il JSON del brano");
+    const jsonData = await response.json();
+    const filtered = filterJsonByActiveInstruments(jsonData, song, active, false);
+    const result = await api("/api/piano-reduction/create", {
+      method: "POST",
+      body: JSON.stringify({
+        songId: song.id,
+        sourceJson: filtered,
+        selectedInstruments: active,
+        replaceExisting: Boolean(existing),
+      }),
+    });
+    await refreshDb();
+    state.selectedSongId = result.song.id;
+    selectNav("reductions");
+    toast(`Esportato su Piano con ${active.length} ${active.length === 1 ? "traccia" : "tracce"}`, "ok");
+  } catch (error) {
+    toast(`Esportazione su Piano fallita: ${error.message}`, "error");
+  } finally {
+    if (el.exportVisualizerToPianoBtn) el.exportVisualizerToPianoBtn.disabled = false;
     showLoading(false);
   }
 }
@@ -4276,6 +4339,7 @@ function bindEvents() {
   el.toggleFavoriteBtn.addEventListener("click", toggleFavoriteSelected);
   el.exportFilteredJsonBtn.addEventListener("click", exportFilteredSongJson);
   el.exportVisualizerSelectionBtn.addEventListener("click", exportFilteredSongJson);
+  el.exportVisualizerToPianoBtn.addEventListener("click", exportVisualizerSelectionToPiano);
   el.createPianoReductionBtn.addEventListener("click", createPianoReduction);
   el.addToPlaylistBtn.addEventListener("click", addSelectedToPlaylist);
 

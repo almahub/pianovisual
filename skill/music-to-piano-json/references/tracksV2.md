@@ -19,6 +19,7 @@ Compatibility mode requires all of these top-level fields:
 - Align reduced harmony and bass pitch classes to the active detected chord, splitting sustained notes at real chord boundaries while preserving source timing and velocity.
 - Build `tracksV2.right` from melody followed by the selected reduced harmony source.
 - Build `tracksV2.left` from bass.
+- Do not invent a missing hand: a melody-only selection produces an empty left hand, while a shared accompaniment source is split by register before hand assignment.
 - Do not stack every source accompaniment track into the right hand.
 
 ## Register rules
