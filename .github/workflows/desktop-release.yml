@@ -55,6 +55,22 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run dist:win -- --publish always
 
+      - name: Keep only the latest three desktop releases
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $releases = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" | ConvertFrom-Json
+          $desktopReleases = @(
+            $releases |
+              Where-Object { -not $_.draft -and -not $_.prerelease -and $_.tag_name -like 'v*' } |
+              Sort-Object { [datetime]$_.published_at } -Descending
+          )
+          $desktopReleases | Select-Object -Skip 3 | ForEach-Object {
+            Write-Host "Removing old release $($_.tag_name); Git tag is preserved"
+            gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/$($_.id)"
+          }
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
