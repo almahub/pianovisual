@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.22] - 2026-08-29
+### Added
+- Avviso prima della conversione multipla quando la selezione contiene copie dello stesso brano.
+- Protezione server che impedisce di creare più riduzioni dalla stessa sorgente musicale equivalente.
+
+### Fixed
+- Il riconoscimento degli accordi esclude la melodia, evitando che le note di passaggio producano accordi falsi.
+- Armonia e basso vengono allineati alle note dell’accordo attivo, conservando timing, durata e velocity della sorgente.
+- Le note sostenute vengono divise correttamente quando attraversano un cambio di accordo.
+
 ## [1.0.21] - 2026-08-28
 ### Added
 - Conversione multipla in Piano Lab dei brani selezionati nella libreria completa.
