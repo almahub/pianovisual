@@ -319,6 +319,17 @@ test('disk realignment preserves MIDI hash used for duplicate detection', async 
 
 test('Piano Lab creates a separate compatible reduction linked to the full song', async () => {
   const sourceJson = makeCompatiblePianoVisionJson();
+  const drums = {
+    ...structuredClone(sourceJson.original.tracks[0]),
+    channel: 9,
+    name: 'Drums',
+    instrument: { family: 'drums', number: 0, name: 'Drum Kit' },
+    notes: sourceJson.original.tracks[0].notes.map((note, index) => ({ ...note, midi: index % 2 ? 38 : 36 })),
+  };
+  sourceJson.original.tracks.push(drums);
+  sourceJson.supportingTracks.push({ notes: drums.notes, myInstrument: -5, theirInstrument: 0 });
+  sourceJson.accompanyingInstruments.push(0);
+  sourceJson.accompanyingChannels.push(9);
   const imported = await api('/api/library/import-json-archive', {
     method: 'POST',
     body: JSON.stringify({ items: [{ fileName: 'skill-source.json', jsonData: sourceJson }] }),
@@ -336,6 +347,7 @@ test('Piano Lab creates a separate compatible reduction linked to the full song'
   assert.equal(result.song.title, 'Skill Source piano');
   assert.match(result.song.jsonPath, /^\/library\/jsonpiano\//);
   assert.equal(result.summary.measures, 1);
+  assert.equal(Object.values(result.song.reductionRoleSourceIndices).includes(3), false);
 
   const db = await api('/api/library');
   assert.equal(db.songs.length, 2);
@@ -346,6 +358,8 @@ test('Piano Lab creates a separate compatible reduction linked to the full song'
   const reduced = JSON.parse(await fs.readFile(path.join(pianoJsonDir, path.basename(result.song.jsonPath)), 'utf8'));
   assert.equal(reduced.tracksV2.right.length, reduced.measures.length);
   assert.equal(reduced.tracksV2.left.length, reduced.measures.length);
+  assert.equal(reduced.original.tracks[3].name, 'Drums');
+  assert.equal('reductionRoleSourceIndices' in reduced, false);
 });
 
 test('Visualizer selection can be reduced and stored directly in Piano Lab', async () => {

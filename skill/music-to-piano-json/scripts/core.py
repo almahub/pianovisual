@@ -62,7 +62,7 @@ def parse_json(path):
         source_name=t.get('name') or t.get('id') or f'Track {i+1}'
         instrument_name=inst.get('name') or inst.get('family') or ''
         name=' - '.join(x for x in (source_name,instrument_name) if x)
-        if notes: tracks.append({'name':name,'program':t.get('program',inst.get('number')),'notes':notes})
+        if notes: tracks.append({'name':name,'program':t.get('program',inst.get('number')),'channel':t.get('channel'),'sourceTrackIndex':i,'notes':notes})
     if not tracks: raise ValueError('JSON contains no non-empty note tracks')
     info=d.get('musicalInfo',d.get('header',header)); tempos=info.get('tempos',d.get('tempos',[]))
     tempo=float(info.get('tempo',d.get('tempo',tempos[0].get('bpm',120) if tempos else 120)))
@@ -187,16 +187,20 @@ def track_features(tr):
     ns=sorted(tr['notes'],key=lambda n:(n['time'],n['midi'])); count=len(ns); mean=sum(n['midi'] for n in ns)/count
     overlaps=sum(1 for a,b in zip(ns,ns[1:]) if b['time']<a['time']+a['duration']-.02)/max(1,count-1)
     intervals=[abs(b['midi']-a['midi']) for a,b in zip(ns,ns[1:])]; continuity=1-min(1,(sum(intervals)/max(1,len(intervals)))/12)
-    name=tr['name'].lower(); melody_hint=1 if any(x in name for x in ('melody','vocal','voice','lead','oboe','flute','clarinet','sax')) else 0
+    name=tr['name'].lower(); percussion=tr.get('channel')==9 or any(x in name for x in ('drum','percussion','drumkit','drum kit'))
+    melody_hint=1 if any(x in name for x in ('melody','vocal','voice','lead','oboe','flute','clarinet','sax')) else 0
     bass_hint=1 if 'bass' in name else 0
     mono=1-overlaps; reg=clamp((mean-52)/28,0,1); low=clamp((60-mean)/24,0,1)
     density_score=min(1,count/100); role_penalty=(.28 if bass_hint else 0)+(.12 if 'guitar' in name else 0)+(.20 if count<32 else 0)
     melody=.30*mono+.15*reg+.20*continuity+.15*density_score+.10*melody_hint+.10*(1-overlaps)-role_penalty
+    if percussion:melody=0
     return {'melody':clamp(melody,0,1),
-      'bass':.35*low+.25*mono+.20*bass_hint+.20*(1-overlaps),'harmony':.45*overlaps+.30*(1-abs(mean-60)/36)+.25*(1-mono),'mean':mean}
+      'bass':0 if percussion else .35*low+.25*mono+.20*bass_hint+.20*(1-overlaps),
+      'harmony':0 if percussion else .45*overlaps+.30*(1-abs(mean-60)/36)+.25*(1-mono),'mean':mean,'support':percussion}
 
 def classify(tracks):
-    fs=[track_features(t) for t in tracks]; mi=max(range(len(tracks)),key=lambda i:fs[i]['melody']); remaining=[i for i in range(len(tracks)) if i!=mi]
+    fs=[track_features(t) for t in tracks]; eligible=[i for i in range(len(tracks)) if not fs[i].get('support')] or list(range(len(tracks)))
+    mi=max(eligible,key=lambda i:fs[i]['melody']); remaining=[i for i in eligible if i!=mi]
     bi=max(remaining or [mi],key=lambda i:fs[i]['bass']); hi=max([i for i in remaining if i!=bi] or remaining or [mi],key=lambda i:fs[i]['harmony'])
     return mi,hi,bi,fs
 
@@ -276,9 +280,9 @@ def reduce(tracks,info,chords=None,classification=None):
     harmony=_align_notes_to_chords(source_h,chords or [],48,72,melody)
     bass=_align_notes_to_chords(source_b,chords or [],36,60)
     return [
-      {'id':'melody','name':'Melodia','role':'melody','hand':'right','instrument':'piano','confidence':round(fs[mi]['melody'],3),'notes':melody},
-      {'id':'harmony','name':'Armonia pianistica','role':'harmony','hand':'right','instrument':'piano','confidence':round(fs[hi]['harmony'],3),'notes':harmony},
-      {'id':'bass','name':'Basso','role':'bass','hand':'left','instrument':'piano','confidence':round(fs[bi]['bass'],3),'notes':bass}]
+      {'id':'melody','name':'Melodia','role':'melody','hand':'right','instrument':'piano','sourceTrackIndex':tracks[mi].get('sourceTrackIndex',mi),'confidence':round(fs[mi]['melody'],3),'notes':melody},
+      {'id':'harmony','name':'Armonia pianistica','role':'harmony','hand':'right','instrument':'piano','sourceTrackIndex':tracks[hi].get('sourceTrackIndex',hi),'confidence':round(fs[hi]['harmony'],3),'notes':harmony},
+      {'id':'bass','name':'Basso','role':'bass','hand':'left','instrument':'piano','sourceTrackIndex':tracks[bi].get('sourceTrackIndex',bi),'confidence':round(fs[bi]['bass'],3),'notes':bass}]
 
 def sections(chords,info):
     bar=60/info['tempo']*4/info['meter'][1]*info['meter'][0]; dur=info['duration']; spans=[]; size=bar*4; t=0

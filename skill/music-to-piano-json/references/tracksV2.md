@@ -21,6 +21,7 @@ Compatibility mode requires all of these top-level fields:
 - Build `tracksV2.left` from bass.
 - Do not invent a missing hand: a melody-only selection produces an empty left hand, while a shared accompaniment source is split by register before hand assignment.
 - Do not stack every source accompaniment track into the right hand.
+- Keep unused source tracks in `original.tracks`; callers may present them separately as supporting accompaniment rather than merging them into either hand.
 
 ## Register rules
 
@@ -73,6 +74,8 @@ Every compatible note contains:
 ## Preservation and repair
 
 Preserve all compatible source fields and their order. Replace only `tracksV2.right` and `tracksV2.left`. Do not add normalized-only `chords` or `sections` at the top level because strict consumers may reject unknown fields.
+
+When source-role traceability is needed, emit melody, harmony, and bass source indices through the optional analysis sidecar. Store that sidecar information in application metadata, not in the compatible JSON.
 
 Accept an optional UTF-8 BOM. Repair only the observed unambiguous leading `1{` defect by removing that single `1`. Reject all other malformed JSON.
 

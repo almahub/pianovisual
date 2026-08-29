@@ -4,12 +4,23 @@ from pathlib import Path
 from core import build, validate
 from program_compatible import export_compatible, looks_compatible
 
+def write_analysis(path, reduction):
+    if not path:
+        return
+    role_sources={}
+    for track in reduction.get('tracks',[]):
+        index=track.get('sourceTrackIndex')
+        if isinstance(index,int) and index>=0:
+            role_sources[track.get('role','')]=index
+    Path(path).write_text(json.dumps({'roleSourceIndices':role_sources},ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+
 def main():
     p=argparse.ArgumentParser(description='Convert structured music to piano_reduction_v2 JSON')
     p.add_argument('input');p.add_argument('-o','--output',required=True);p.add_argument('--start',type=float,default=0);p.add_argument('--end',type=float)
     p.add_argument('--title');p.add_argument('--artist')
     p.add_argument('--format',choices=('auto','normalized','program-compatible'),default='auto',
                    help='auto preserves recognized tracksV2 program JSON; normalized emits piano_reduction_v2')
+    p.add_argument('--analysis-output',help='write role/source-track metadata to a separate JSON sidecar')
     a=p.parse_args()
     if Path(a.input).resolve()==Path(a.output).resolve():p.error('output must differ from input')
     try:
@@ -18,6 +29,7 @@ def main():
             if a.start or a.end is not None:
                 raise ValueError('Excerpt cropping is not yet safe in program-compatible mode; use --format normalized')
             d,repaired,reduction=export_compatible(a.input,a.output)
+            write_analysis(a.analysis_output,reduction)
             notes_right=sum(len(x['notes']) for x in d['tracksV2']['right'])
             notes_left=sum(len(x['notes']) for x in d['tracksV2']['left'])
             repair='; removed stray leading 1' if repaired else ''
@@ -27,6 +39,7 @@ def main():
             return 0
         d=build(a.input,a.start,a.end,a.title,a.artist);validate(d)
         Path(a.output).write_text(json.dumps(d,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+        write_analysis(a.analysis_output,d)
         tr={x['role']:x for x in d['tracks']}; types=' / '.join(x['type'] for x in d['sections'])
         print(f"Created: {a.output}\nMelody: {len(tr['melody']['notes'])} notes\nChords: {len(d['chords'])}\nBass: {len(tr['bass']['notes'])} notes\nStructure: {types}\nTempo: {d['musicalInfo']['tempo']} BPM\nKey: {d['musicalInfo'].get('key') or 'not supplied'}")
     except Exception as e: print(f'Error: {e}',file=sys.stderr);return 1

@@ -336,13 +336,15 @@ async function findPythonRuntime() {
   throw new Error("Python 3 non trovato. Installa Python 3 e riavvia PianoVisual per usare Piano Lab.");
 }
 
-async function runPianoReduction(sourcePath, outputPath) {
+async function runPianoReduction(sourcePath, outputPath, analysisOutputPath = "") {
+  const reductionArgs = [sourcePath, "-o", outputPath, "--format", "program-compatible"];
+  if (analysisOutputPath) reductionArgs.push("--analysis-output", analysisOutputPath);
   const standalone = await standalonePianoEnginePath();
   if (standalone) {
     try {
       const { stdout } = await execFileAsync(
         standalone,
-        [sourcePath, "-o", outputPath, "--format", "program-compatible"],
+        reductionArgs,
         { windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
       );
       return { summary: String(stdout || "").trim(), runtime: "motore integrato" };
@@ -355,7 +357,7 @@ async function runPianoReduction(sourcePath, outputPath) {
   try {
     const { stdout } = await execFileAsync(
       runtime.command,
-      [...runtime.prefix, scriptPath, sourcePath, "-o", outputPath, "--format", "program-compatible"],
+      [...runtime.prefix, scriptPath, ...reductionArgs],
       { windowsHide: true, maxBuffer: 16 * 1024 * 1024 },
     );
     return { summary: String(stdout || "").trim(), runtime: runtime.version };
@@ -897,6 +899,7 @@ async function handleApi(req, res, url) {
 
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pianovisual-piano-"));
     const outputPath = path.join(tempDir, "reduction.json");
+    const analysisOutputPath = path.join(tempDir, "analysis.json");
     try {
       let reductionSourcePath = sourcePath;
       if (payload.sourceJson !== undefined) {
@@ -910,8 +913,17 @@ async function handleApi(req, res, url) {
         reductionSourcePath = path.join(tempDir, "selected-tracks.json");
         await writeJsonAtomic(reductionSourcePath, payload.sourceJson);
       }
-      const engineResult = await runPianoReduction(reductionSourcePath, outputPath);
+      const engineResult = await runPianoReduction(reductionSourcePath, outputPath, analysisOutputPath);
       const reducedJson = JSON.parse(await fs.readFile(outputPath, "utf8"));
+      let roleSourceIndices = {};
+      try {
+        const analysis = JSON.parse(await fs.readFile(analysisOutputPath, "utf8"));
+        roleSourceIndices = Object.fromEntries(
+          Object.entries(analysis?.roleSourceIndices || {}).filter(([, index]) => Number.isInteger(index) && index >= 0),
+        );
+      } catch {
+        // Legacy engines may not emit the optional analysis sidecar.
+      }
       const validation = validatePianoVisionJsonData(reducedJson);
       if (!validation.ok) throw new Error(`JSON ridotto non valido: ${validation.errors.join(", ")}`);
 
@@ -962,6 +974,7 @@ async function handleApi(req, res, url) {
         variantType: "piano_reduction",
         derivedFromSongId: sourceSong.id,
         reductionEngine: "music-to-piano-json",
+        reductionRoleSourceIndices: roleSourceIndices,
         reductionSourceInstruments: Array.isArray(payload.selectedInstruments)
           ? payload.selectedInstruments.slice(0, 128).map((name) => String(name || "").trim()).filter(Boolean)
           : [],

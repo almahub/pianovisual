@@ -799,6 +799,9 @@ function colorFromInstrument(name, past = false) {
   let hash = 0;
   for (let i = 0; i < s.length; i += 1) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
   const hue = hash % 360;
+  if (s.startsWith("Accompagnamento ")) {
+    return past ? `hsl(${hue} 16% 27%)` : `hsl(${hue} 34% 70%)`;
+  }
   return past ? `hsl(${hue} 30% 30%)` : `hsl(${hue} 78% 62%)`;
 }
 
@@ -3170,12 +3173,12 @@ function animateMiniVisualizer() {
   requestAnimationFrame(animateMiniVisualizer);
 }
 
-function extractPianoReductionTracks(jsonData) {
+function extractPianoReductionTracks(jsonData, song = null) {
   const hands = [
     { key: "right", instrument: "Piano mano destra" },
     { key: "left", instrument: "Piano mano sinistra" },
   ];
-  return hands
+  const pianoHands = hands
     .map(({ key, instrument }) => {
       const notes = (jsonData?.tracksV2?.[key] || []).flatMap((measure) =>
         (measure?.notes || []).map((note) => ({
@@ -3189,10 +3192,35 @@ function extractPianoReductionTracks(jsonData) {
       return { instrument, notes };
     })
     .filter((track) => track.notes.length > 0);
+
+  const roleSources = song?.reductionRoleSourceIndices;
+  if (!roleSources || typeof roleSources !== "object") return pianoHands;
+  const usedSourceIndices = new Set(
+    Object.values(roleSources).filter((index) => Number.isInteger(index) && index >= 0),
+  );
+  const originalTracks = Array.isArray(jsonData?.original?.tracks) ? jsonData.original.tracks : [];
+  const accompaniment = originalTracks
+    .map((track, idx) => {
+      if (usedSourceIndices.has(idx)) return null;
+      const sourceName = repairMojibake(
+        String(track?.name || track?.instrument?.name || `Traccia ${idx + 1}`).trim(),
+      );
+      const instrument = `Accompagnamento ${idx + 1} · ${sourceName}`;
+      const notes = (track?.notes || []).map((note) => ({
+        midi: Number(note.midi ?? note.note ?? 60),
+        time: Number(note.time ?? note.start ?? 0),
+        duration: Math.max(0.05, Number(note.duration || 0.2)),
+        velocity: clamp01(Number(note.velocity ?? 0.7)),
+        instrument,
+      }));
+      return { instrument, notes };
+    })
+    .filter((track) => track?.notes.length > 0);
+  return [...pianoHands, ...accompaniment];
 }
 
 function extractPlayableTracks(jsonData, fallbackInstruments = [], song = null) {
-  if (song?.variantType === "piano_reduction") return extractPianoReductionTracks(jsonData);
+  if (song?.variantType === "piano_reduction") return extractPianoReductionTracks(jsonData, song);
   const originalTracks = Array.isArray(jsonData?.original?.tracks) ? jsonData.original.tracks : [];
   if (originalTracks.length > 0) {
     return originalTracks

@@ -27,6 +27,7 @@ The scripts use only Python's standard library. They accept `.json`, `.mid`, `.m
 
 - Score source tracks/parts using monophony, register, continuity, density, interval motion, simultaneity, name/instrument hints, and low-register behavior.
 - Never assume an instrument name alone determines its role.
+- Treat channel 10 percussion and clearly identified drum/percussion tracks as supporting sources when pitched tracks are available; do not fold them into either piano hand.
 - Keep `chords` distinct from `harmony`: chords describe harmonic identity; harmony notes encode a piano voicing.
 - Infer chord identity from accompaniment and bass after excluding the detected melody, so passing melody tones do not create false chord extensions.
 - Split harmony and bass notes at chord boundaries when necessary and keep their pitch classes inside the active chord; melody may retain intentional non-chord tones.
@@ -48,6 +49,8 @@ Use these output modes:
 Do not crop excerpts in program-compatible mode because doing so safely requires coordinated rewriting of measures, both hands, supporting tracks, maps, and the embedded original. Use normalized mode for `--start`/`--end`.
 
 Validate normalized output against [references/piano_reduction.schema.json](references/piano_reduction.schema.json). Validate compatible output with `scripts/program_compatible.py`.
+
+Use `--analysis-output <path>` when the caller needs the source-track indices assigned to melody, harmony, and bass. Keep this metadata in the sidecar or application database, never in the strict program-compatible container.
 
 Read [references/tracksV2.md](references/tracksV2.md) before creating, debugging, or changing program-compatible output. It defines the exact hand, measure, note, timing, preservation, and validation rules.
 

@@ -88,6 +88,14 @@ test("instrument toggles update the loaded count and scheduled audio", async () 
   assert.equal(app.includes("if (wasPlaying && hasPlayableNotes) await playPlayer(resumeAt)"), true);
 });
 
+test("piano reductions keep unused source tracks as muted accompaniment groups", async () => {
+  const app = await fs.readFile(path.join(root, "app.js"), "utf8");
+  assert.equal(app.includes("song?.reductionRoleSourceIndices"), true);
+  assert.equal(app.includes("usedSourceIndices.has(idx)"), true);
+  assert.equal(app.includes("Accompagnamento ${idx + 1} · ${sourceName}"), true);
+  assert.equal(app.includes('s.startsWith("Accompagnamento ")'), true);
+});
+
 test("desktop package includes and unpacks the local piano reduction engine", async () => {
   const pkg = JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf8"));
   assert.equal(pkg.build.files.includes("skill/music-to-piano-json/**/*"), true);
