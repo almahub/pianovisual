@@ -4,6 +4,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
+MIN_PLAYABLE_CHORD_CONFIDENCE = .5
 QUALITIES = {
  'major':(0,4,7),'minor':(0,3,7),'diminished':(0,3,6),'augmented':(0,4,8),
  'sus2':(0,2,7),'sus4':(0,5,7),'6':(0,4,7,9),'minor6':(0,3,7,9),
@@ -204,22 +205,39 @@ def classify(tracks):
     bi=max(remaining or [mi],key=lambda i:fs[i]['bass']); hi=max([i for i in remaining if i!=bi] or remaining or [mi],key=lambda i:fs[i]['harmony'])
     return mi,hi,bi,fs
 
-def infer_chords(tracks,info):
-    beat=60/info['tempo']*4/info['meter'][1]; alln=[n for tr in tracks for n in tr['notes']]; out=[]; t=0
+def infer_chords(tracks,info,bass_track=None):
+    beat=60/info['tempo']*4/info['meter'][1]; alln=[n for tr in tracks for n in tr['notes']]; out=[]; t=0; previous=None
     while t<info['duration']-.001:
         active=[n for n in alln if n['time']<t+beat and n['time']+n['duration']>t]; weights=Counter()
-        for n in active: weights[n['midi']%12]+=min(n['duration'],beat)
+        for n in active:
+            overlap=max(0,min(t+beat,n['time']+n['duration'])-max(t,n['time']))
+            weights[n['midi']%12]+=overlap*max(.2,float(n.get('velocity',.8)))
         if len(weights)>=2:
+            bass_active=[n for n in (bass_track or {}).get('notes',[]) if n['time']<t+beat and n['time']+n['duration']>t]
+            observed_bass=min(bass_active,key=lambda n:n['midi'])['midi']%12 if bass_active else None
             best=None
             for root in range(12):
                 for q,ints in QUALITIES.items():
-                    pcs={(root+i)%12 for i in ints}; hit=sum(weights[p] for p in pcs); extra=sum(v for p,v in weights.items() if p not in pcs); score=hit-.35*extra-.05*len(pcs)
+                    pcs={(root+i)%12 for i in ints}; hit=sum(weights[p] for p in pcs); extra=sum(v for p,v in weights.items() if p not in pcs)
+                    bass_bonus=.18*sum(weights.values()) if observed_bass in pcs else (-.20*sum(weights.values()) if observed_bass is not None else 0)
+                    continuity_bonus=.08*sum(weights.values()) if previous and previous[:2]==(root,q) else 0
+                    score=hit-.42*extra-.05*len(pcs)+bass_bonus+continuity_bonus
                     if best is None or score>best[0]:best=(score,root,q,pcs,hit,extra)
-            _,root,q,pcs,hit,extra=best; conf=clamp(hit/(hit+extra+1e-9)*.9,0.35,.95); bass=min(active,key=lambda n:n['midi'])['midi']%12
+            _,root,q,pcs,hit,extra=best; conf=clamp(hit/(hit+extra+1e-9)*.9,0.35,.95)
+            bass=observed_bass if observed_bass in pcs else root; previous=(root,q)
             sym=NAMES[root]+SUFFIX.get(q,q)+(f'/{NAMES[bass]}' if bass!=root else '')
             out.append({'time':round(t,6),'duration':round(min(beat,info['duration']-t),6),'measure':int(t/(beat*info['meter'][0]))+1,
-              'beat':int((t/beat)%info['meter'][0])+1,'symbol':sym,'root':root,'quality':q,'bass':NAMES[bass],'pitchClasses':sorted(pcs),'confidence':round(conf,3)})
+              'beat':int((t/beat)%info['meter'][0])+1,'symbol':sym,'root':root,'quality':q,'bass':NAMES[bass],
+              'bassPitchClass':bass,'pitchClasses':sorted(pcs),'confidence':round(conf,3)})
         t+=beat
+    # Suppress a single low-confidence beat that disagrees with equal neighbors.
+    for i in range(1,len(out)-1):
+        before,current,after=out[i-1],out[i],out[i+1]
+        contiguous=abs(before['time']+before['duration']-current['time'])<1e-4 and abs(current['time']+current['duration']-after['time'])<1e-4
+        if contiguous and before['root']==after['root'] and before['quality']==after['quality'] and (current['root'],current['quality'])!=(before['root'],before['quality']) and current['confidence']<.72:
+            for key in ('root','quality','bass','bassPitchClass','pitchClasses','symbol'):
+                current[key]=before[key]
+            current['confidence']=round(min(before['confidence'],after['confidence'])*.9,3)
     merged=[]
     for c in out:
         if merged and merged[-1]['symbol']==c['symbol'] and abs(merged[-1]['time']+merged[-1]['duration']-c['time'])<1e-4:merged[-1]['duration']=round(merged[-1]['duration']+c['duration'],6)
@@ -268,7 +286,46 @@ def _align_notes_to_chords(notes,chords,low,high,melody=None):
             n['time']=round(start,6);n['duration']=round(end-start,6);aligned.append(n)
     return sorted(aligned,key=lambda n:(n['time'],n['midi']))
 
-def reduce(tracks,info,chords=None,classification=None):
+def _chord_voicings(chords,melody=None):
+    melody=melody or []; out=[]; previous=[]
+    for chord in chords:
+        if float(chord.get('confidence',0))<MIN_PLAYABLE_CHORD_CONFIDENCE:continue
+        pcs=set(chord['pitchClasses']); candidates=[pitch for pitch in range(48,73) if pitch%12 in pcs]
+        target_count=min(3,len(pcs)); best=None
+        from itertools import combinations
+        for voicing in combinations(candidates,target_count):
+            if any(b-a<3 for a,b in zip(voicing,voicing[1:])):continue
+            simultaneous=[n for n in melody if n['time']<chord['time']+chord['duration'] and n['time']+n['duration']>chord['time']]
+            collisions=sum(1 for pitch in voicing for note in simultaneous if -3<=pitch-note['midi']<=1)
+            movement=sum(min(abs(pitch-old) for old in previous) for pitch in voicing) if previous else sum(abs(pitch-60) for pitch in voicing)
+            score=collisions*100+movement+max(voicing)-min(voicing)
+            if best is None or score<best[0]:best=(score,voicing)
+        voicing=list(best[1]) if best else sorted(candidates,key=lambda pitch:abs(pitch-60))[:target_count]
+        previous=voicing
+        for pitch in voicing:
+            out.append({'midi':pitch,'name':note_name(pitch),'time':chord['time'],'duration':chord['duration'],
+              'velocity':.62,'confidence':chord['confidence']})
+    return out
+
+def _align_bass_to_chords(notes,chords):
+    if not chords:return _align_notes_to_chords(notes,[],36,60)
+    aligned=[];seen=set()
+    for source in notes:
+        note_start=float(source['time']);note_end=note_start+float(source['duration'])
+        overlaps=[c for c in chords if c['time']<note_end-1e-6 and c['time']+c['duration']>note_start+1e-6]
+        for chord in overlaps:
+            if float(chord.get('confidence',0))<MIN_PLAYABLE_CHORD_CONFIDENCE:continue
+            start=max(note_start,float(chord['time']));end=min(note_end,float(chord['time'])+float(chord['duration']))
+            target_pc=int(chord.get('bassPitchClass',chord['root']))
+            candidates=[pitch for pitch in range(36,61) if pitch%12==target_pc]
+            pitch=min(candidates,key=lambda value:abs(value-int(source['midi'])))
+            key=(round(start,6),round(end-start,6),pitch)
+            if key in seen or end-start<=1e-6:continue
+            seen.add(key);n=dict(source);n.update({'midi':pitch,'name':note_name(pitch),'time':round(start,6),'duration':round(end-start,6),
+              'confidence':min(float(source.get('confidence',1)),float(chord['confidence']))});aligned.append(n)
+    return sorted(aligned,key=lambda n:(n['time'],n['midi']))
+
+def reduce(tracks,info,chords=None,classification=None,arrangement_mode='piano_voice'):
     mi,hi,bi,fs=classification or classify(tracks); melody=[dict(n) for n in tracks[mi]['notes']]
     # A reduction must remain playable: use the strongest harmonic source instead
     # of stacking every orchestral accompaniment track into one piano hand.
@@ -277,10 +334,10 @@ def reduce(tracks,info,chords=None,classification=None):
     if hi==bi and len(tracks)>1:
         source_h=[n for n in source_h if n['midi']>=48]
         source_b=[n for n in source_b if n['midi']<60]
-    harmony=_align_notes_to_chords(source_h,chords or [],48,72,melody)
-    bass=_align_notes_to_chords(source_b,chords or [],36,60)
+    harmony=_chord_voicings(chords or [],melody if arrangement_mode=='piano_solo' else []) if source_h else []
+    bass=_align_bass_to_chords(source_b,chords or [])
     return [
-      {'id':'melody','name':'Melodia','role':'melody','hand':'right','instrument':'piano','sourceTrackIndex':tracks[mi].get('sourceTrackIndex',mi),'confidence':round(fs[mi]['melody'],3),'notes':melody},
+      {'id':'melody','name':'Voce / Melodia','role':'melody','hand':'right' if arrangement_mode=='piano_solo' else 'none','instrument':'piano' if arrangement_mode=='piano_solo' else 'voice','sourceTrackIndex':tracks[mi].get('sourceTrackIndex',mi),'confidence':round(fs[mi]['melody'],3),'notes':melody},
       {'id':'harmony','name':'Armonia pianistica','role':'harmony','hand':'right','instrument':'piano','sourceTrackIndex':tracks[hi].get('sourceTrackIndex',hi),'confidence':round(fs[hi]['harmony'],3),'notes':harmony},
       {'id':'bass','name':'Basso','role':'bass','hand':'left','instrument':'piano','sourceTrackIndex':tracks[bi].get('sourceTrackIndex',bi),'confidence':round(fs[bi]['bass'],3),'notes':bass}]
 
@@ -313,25 +370,33 @@ def crop(tracks,info,start,end):
     info['duration']=end-start
     return tracks,info
 
-def build(path,start=0,end=None,title=None,artist=None):
+def build(path,start=0,end=None,title=None,artist=None,arrangement_mode='piano_voice'):
     kind=inspect_input(path); parser={'json':parse_json,'midi':parse_midi,'musicxml':parse_musicxml}[kind]; tracks,info=parser(path)
     tracks,info=crop(tracks,info,start,end); tracks=[t for t in tracks if t['notes']]
     if not tracks:raise ValueError('Selected interval contains no notes')
     classification=classify(tracks);melody_index=classification[0]
-    harmonic_tracks=[track for index,track in enumerate(tracks) if index!=melody_index]
-    chords=infer_chords(harmonic_tracks,info) if harmonic_tracks else []; reduced=reduce(tracks,info,chords,classification)
+    bass_index=classification[2];harmonic_tracks=[track for index,track in enumerate(tracks) if index!=melody_index and not classification[3][index].get('support')]
+    chords=infer_chords(harmonic_tracks,info,tracks[bass_index] if harmonic_tracks else None) if harmonic_tracks else []; reduced=reduce(tracks,info,chords,classification,arrangement_mode)
     return {'format':'piano_reduction_v2','title':title or info.pop('title',Path(path).stem),'artist':artist if artist is not None else info.pop('artist',''),
       'source':{'filename':Path(path).name,'type':kind,'analysis_mode':'structured','confidence':1.0},'musicalInfo':info,
-      'sections':sections(chords,info),'chords':chords,'tracks':reduced}
+      'arrangementMode':arrangement_mode,'sections':sections(chords,info),'chords':chords,'tracks':reduced}
 
 def validate(d):
     errors=[]
     if d.get('format')!='piano_reduction_v2':errors.append('wrong format')
     roles=[t.get('role') for t in d.get('tracks',[])]
     if roles!=['melody','harmony','bass']:errors.append('tracks must be melody, harmony, bass')
+    if d.get('arrangementMode') not in ('piano_solo','piano_voice'):errors.append('invalid arrangement mode')
     for tr in d.get('tracks',[]):
         for n in tr.get('notes',[]):
             if not 0<=n.get('midi',-1)<=127 or n.get('duration',0)<=0:errors.append(f'invalid note in {tr.get("id")}')
+    chords=d.get('chords',[])
+    for role in ('harmony','bass'):
+        tr=next((item for item in d.get('tracks',[]) if item.get('role')==role),{'notes':[]})
+        for note in tr['notes']:
+            active=[chord for chord in chords if chord['time']<note['time']+note['duration']-1e-6 and chord['time']+chord['duration']>note['time']+1e-6]
+            if active and any(note['midi']%12 not in chord['pitchClasses'] for chord in active):errors.append(f'{role} note outside active chord')
+            if role=='bass' and active and any(note['midi']%12!=chord.get('bassPitchClass',chord['root']) for chord in active):errors.append('bass note does not match chord bass')
     for s in d.get('sections',[]):
         if s['end']<=s['start']:errors.append(f'invalid section {s["id"]}')
     if errors:raise ValueError('; '.join(errors))

@@ -21,6 +21,7 @@ test("ui critical controls exist for key workflows", async () => {
     "libraryToolbar",
     "pianoLabPanel",
     "pianoEngineStatus",
+    "pianoArrangementMode",
     "createPianoReductionBtn",
     "remoteCatalogPanel",
     "remoteCatalogSearch",
@@ -92,8 +93,12 @@ test("piano reductions keep unused source tracks as muted accompaniment groups",
   const app = await fs.readFile(path.join(root, "app.js"), "utf8");
   assert.equal(app.includes("song?.reductionRoleSourceIndices"), true);
   assert.equal(app.includes("usedSourceIndices.has(idx)"), true);
-  assert.equal(app.includes("Accompagnamento ${idx + 1} · ${sourceName}"), true);
+  assert.equal(app.includes("sourceTrackGroup(track, idx, `Accompagnamento ${idx + 1}`)"), true);
   assert.equal(app.includes('s.startsWith("Accompagnamento ")'), true);
+  assert.equal(app.includes('sourceTrackGroup(originalTracks[melodyIndex], melodyIndex, "Voce / Melodia")'), true);
+  assert.equal(app.includes('arrangementMode === "piano_solo"'), true);
+  assert.equal(app.includes("loadedSong?.reductionChords"), true);
+  assert.equal(app.includes("Accordo: ${activeChord.symbol}"), true);
 });
 
 test("desktop package includes and unpacks the local piano reduction engine", async () => {

@@ -12,7 +12,11 @@ def write_analysis(path, reduction):
         index=track.get('sourceTrackIndex')
         if isinstance(index,int) and index>=0:
             role_sources[track.get('role','')]=index
-    Path(path).write_text(json.dumps({'roleSourceIndices':role_sources},ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+    Path(path).write_text(json.dumps({
+      'arrangementMode':reduction.get('arrangementMode','piano_voice'),
+      'roleSourceIndices':role_sources,
+      'chords':reduction.get('chords',[]),
+    },ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
 
 def main():
     p=argparse.ArgumentParser(description='Convert structured music to piano_reduction_v2 JSON')
@@ -21,6 +25,8 @@ def main():
     p.add_argument('--format',choices=('auto','normalized','program-compatible'),default='auto',
                    help='auto preserves recognized tracksV2 program JSON; normalized emits piano_reduction_v2')
     p.add_argument('--analysis-output',help='write role/source-track metadata to a separate JSON sidecar')
+    p.add_argument('--arrangement-mode',choices=('piano_voice','piano_solo'),default='piano_voice',
+                   help='piano_voice keeps melody/voice separate; piano_solo includes melody in the right hand')
     a=p.parse_args()
     if Path(a.input).resolve()==Path(a.output).resolve():p.error('output must differ from input')
     try:
@@ -28,7 +34,7 @@ def main():
         if compatible:
             if a.start or a.end is not None:
                 raise ValueError('Excerpt cropping is not yet safe in program-compatible mode; use --format normalized')
-            d,repaired,reduction=export_compatible(a.input,a.output)
+            d,repaired,reduction=export_compatible(a.input,a.output,arrangement_mode=a.arrangement_mode)
             write_analysis(a.analysis_output,reduction)
             notes_right=sum(len(x['notes']) for x in d['tracksV2']['right'])
             notes_left=sum(len(x['notes']) for x in d['tracksV2']['left'])
@@ -37,7 +43,7 @@ def main():
             harmony=len(next(x for x in reduction['tracks'] if x['role']=='harmony')['notes'])
             print(f"Created: {a.output}\nFormat: program-compatible{repair}\nMeasures: {len(d['measures'])}\nMelody: {melody} notes\nHarmony: {harmony} notes\nRight hand: {notes_right} notes\nLeft hand: {notes_left} notes")
             return 0
-        d=build(a.input,a.start,a.end,a.title,a.artist);validate(d)
+        d=build(a.input,a.start,a.end,a.title,a.artist,a.arrangement_mode);validate(d)
         Path(a.output).write_text(json.dumps(d,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
         write_analysis(a.analysis_output,d)
         tr={x['role']:x for x in d['tracks']}; types=' / '.join(x['type'] for x in d['sections'])

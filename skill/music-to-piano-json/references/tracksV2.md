@@ -16,8 +16,10 @@ Compatibility mode requires all of these top-level fields:
 - Detect bass using low register, monophony, overlap behavior, and bass name/instrument evidence.
 - Detect harmony using simultaneity/polyphony and middle-register behavior.
 - Infer chords from non-melody sources so melodic passing tones do not alter the accompaniment harmony.
-- Align reduced harmony and bass pitch classes to the active detected chord, splitting sustained notes at real chord boundaries while preserving source timing and velocity.
-- Build `tracksV2.right` from melody followed by the selected reduced harmony source.
+- Generate reduced harmony voicings from the stabilized active chord sequence with economical voice leading.
+- Align bass timing to the source bass but force its pitch class to the active chord's declared bass; use slash chords for real inversions.
+- In `piano_voice` mode, build `tracksV2.right` from piano harmony and preserve melody/voice as an independent original/supporting source.
+- In `piano_solo` mode, build `tracksV2.right` from melody followed by piano harmony.
 - Build `tracksV2.left` from bass.
 - Do not invent a missing hand: a melody-only selection produces an empty left hand, while a shared accompaniment source is split by register before hand assignment.
 - Do not stack every source accompaniment track into the right hand.
@@ -75,7 +77,7 @@ Every compatible note contains:
 
 Preserve all compatible source fields and their order. Replace only `tracksV2.right` and `tracksV2.left`. Do not add normalized-only `chords` or `sections` at the top level because strict consumers may reject unknown fields.
 
-When source-role traceability is needed, emit melody, harmony, and bass source indices through the optional analysis sidecar. Store that sidecar information in application metadata, not in the compatible JSON.
+When source-role traceability is needed, emit arrangement mode, chord analysis, and melody/harmony/bass source indices through the optional analysis sidecar. Store that sidecar information in application metadata, not in the compatible JSON.
 
 Accept an optional UTF-8 BOM. Repair only the observed unambiguous leading `1{` defect by removing that single `1`. Reject all other malformed JSON.
 

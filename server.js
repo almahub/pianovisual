@@ -153,6 +153,10 @@ async function readDb() {
   let changed = migrateDbSchema(db);
   for (const song of db.songs) {
     if (song.variantType !== "piano_reduction") continue;
+    if (!song.reductionMode) {
+      song.reductionMode = "piano_solo";
+      changed = true;
+    }
     const currentTitle = String(song.title || "Senza titolo").trim();
     const renamedTitle = currentTitle.replace(/\s*[·-]?\s*Riduzione piano\s*$/i, "").trim();
     const nextTitle = /\spiano$/i.test(renamedTitle) ? renamedTitle : `${renamedTitle || "Senza titolo"} piano`;
@@ -336,9 +340,10 @@ async function findPythonRuntime() {
   throw new Error("Python 3 non trovato. Installa Python 3 e riavvia PianoVisual per usare Piano Lab.");
 }
 
-async function runPianoReduction(sourcePath, outputPath, analysisOutputPath = "") {
+async function runPianoReduction(sourcePath, outputPath, analysisOutputPath = "", arrangementMode = "piano_voice") {
   const reductionArgs = [sourcePath, "-o", outputPath, "--format", "program-compatible"];
   if (analysisOutputPath) reductionArgs.push("--analysis-output", analysisOutputPath);
+  reductionArgs.push("--arrangement-mode", arrangementMode);
   const standalone = await standalonePianoEnginePath();
   if (standalone) {
     try {
@@ -866,6 +871,7 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/piano-reduction/create") {
     const payload = await readBodyJson(req);
+    const arrangementMode = payload.arrangementMode === "piano_solo" ? "piano_solo" : "piano_voice";
     const songId = String(payload.songId || "").trim();
     const db = await readDb();
     const sourceSong = db.songs.find((song) => song.id === songId);
@@ -913,13 +919,14 @@ async function handleApi(req, res, url) {
         reductionSourcePath = path.join(tempDir, "selected-tracks.json");
         await writeJsonAtomic(reductionSourcePath, payload.sourceJson);
       }
-      const engineResult = await runPianoReduction(reductionSourcePath, outputPath, analysisOutputPath);
+      const engineResult = await runPianoReduction(reductionSourcePath, outputPath, analysisOutputPath, arrangementMode);
       const reducedJson = JSON.parse(await fs.readFile(outputPath, "utf8"));
       let roleSourceIndices = {};
+      let reductionAnalysis = {};
       try {
-        const analysis = JSON.parse(await fs.readFile(analysisOutputPath, "utf8"));
+        reductionAnalysis = JSON.parse(await fs.readFile(analysisOutputPath, "utf8"));
         roleSourceIndices = Object.fromEntries(
-          Object.entries(analysis?.roleSourceIndices || {}).filter(([, index]) => Number.isInteger(index) && index >= 0),
+          Object.entries(reductionAnalysis?.roleSourceIndices || {}).filter(([, index]) => Number.isInteger(index) && index >= 0),
         );
       } catch {
         // Legacy engines may not emit the optional analysis sidecar.
@@ -964,7 +971,9 @@ async function handleApi(req, res, url) {
         key: sourceSong.key || "",
         bpm: Number(sourceSong.bpm || 120),
         duration: Number(reducedJson.song_length || sourceSong.duration || 0),
-        instruments: ["Piano mano destra", "Piano mano sinistra"],
+        instruments: arrangementMode === "piano_solo"
+          ? ["Piano mano destra", "Piano mano sinistra"]
+          : ["Piano mano destra", "Piano mano sinistra", "Voce / Melodia"],
         updatedAt: nowIso(),
         fileHash: reducedHash,
         jsonContentHash: reducedHash,
@@ -974,7 +983,9 @@ async function handleApi(req, res, url) {
         variantType: "piano_reduction",
         derivedFromSongId: sourceSong.id,
         reductionEngine: "music-to-piano-json",
+        reductionMode: arrangementMode,
         reductionRoleSourceIndices: roleSourceIndices,
+        reductionChords: Array.isArray(reductionAnalysis?.chords) ? reductionAnalysis.chords.slice(0, 4096) : [],
         reductionSourceInstruments: Array.isArray(payload.selectedInstruments)
           ? payload.selectedInstruments.slice(0, 128).map((name) => String(name || "").trim()).filter(Boolean)
           : [],

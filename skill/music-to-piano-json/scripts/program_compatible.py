@@ -72,10 +72,11 @@ def _tempo_segments(data):
         return int(round(tick0+(seconds-sec0)*ppq*bpm0/60))
     return seconds_to_ticks
 
-def rebuild_tracks_v2(data,source):
+def rebuild_tracks_v2(data,source,arrangement_mode='piano_voice'):
     from core import build
-    reduction=build(source); roles={x['role']:x['notes'] for x in reduction['tracks']}
-    hands={'right':roles['melody']+roles['harmony'],'left':roles['bass']}
+    reduction=build(source,arrangement_mode=arrangement_mode); roles={x['role']:x['notes'] for x in reduction['tracks']}
+    right=roles['harmony'] if arrangement_mode=='piano_voice' else roles['melody']+roles['harmony']
+    hands={'right':right,'left':roles['bass']}
     to_ticks=_tempo_segments(data); measures=data['measures']; starts=[int(x['ticksStart']) for x in measures]; ppq=int(data['resolution'])
     rebuilt={}
     for hand,notes in hands.items():
@@ -101,9 +102,9 @@ def rebuild_tracks_v2(data,source):
     data['tracksV2']=rebuilt
     return reduction
 
-def export_compatible(source,output,rebuild=True):
+def export_compatible(source,output,rebuild=True,arrangement_mode='piano_voice'):
     data,repaired=load_compatible(source)
-    reduction=rebuild_tracks_v2(data,source) if rebuild else None
+    reduction=rebuild_tracks_v2(data,source,arrangement_mode) if rebuild else None
     Path(output).write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
     check=json.loads(Path(output).read_text(encoding='utf-8'))
     validate_compatible(check)

@@ -2,9 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://openai.local/piano_reduction_v2.json",
   "type": "object",
-  "required": ["format", "title", "artist", "source", "musicalInfo", "sections", "chords", "tracks"],
+  "required": ["format", "title", "artist", "source", "musicalInfo", "arrangementMode", "sections", "chords", "tracks"],
   "properties": {
     "format": {"const": "piano_reduction_v2"},
+    "arrangementMode": {"enum": ["piano_voice", "piano_solo"]},
     "title": {"type": "string"}, "artist": {"type": "string"},
     "source": {"type": "object", "required": ["filename", "type", "analysis_mode", "confidence"], "properties": {
       "filename": {"type": "string"}, "type": {"enum": ["json", "midi", "musicxml"]},
@@ -30,14 +31,14 @@
     }, "additionalProperties": true},
     "track": {"type": "object", "required": ["id", "name", "role", "hand", "instrument", "confidence", "notes"], "properties": {
       "id": {"type": "string"}, "name": {"type": "string"}, "role": {"enum": ["melody", "harmony", "bass"]},
-      "hand": {"enum": ["right", "left"]}, "instrument": {"const": "piano"}, "confidence": {"$ref": "#/$defs/confidence"},
+      "hand": {"enum": ["right", "left", "none"]}, "instrument": {"enum": ["piano", "voice"]}, "confidence": {"$ref": "#/$defs/confidence"},
       "notes": {"type": "array", "items": {"$ref": "#/$defs/note"}}
     }, "additionalProperties": true},
-    "chord": {"type": "object", "required": ["time", "duration", "symbol", "root", "quality", "pitchClasses", "confidence"], "properties": {
+    "chord": {"type": "object", "required": ["time", "duration", "symbol", "root", "quality", "bass", "bassPitchClass", "pitchClasses", "confidence"], "properties": {
       "time": {"type": "number", "minimum": 0}, "duration": {"type": "number", "exclusiveMinimum": 0},
       "measure": {"type": "integer", "minimum": 1}, "beat": {"type": "number", "minimum": 1},
       "symbol": {"type": "string"}, "root": {"type": "integer", "minimum": 0, "maximum": 11},
-      "quality": {"type": "string"}, "bass": {"type": "string"}, "pitchClasses": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 11}, "uniqueItems": true},
+      "quality": {"type": "string"}, "bass": {"type": "string"}, "bassPitchClass": {"type": "integer", "minimum": 0, "maximum": 11}, "pitchClasses": {"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 11}, "uniqueItems": true},
       "confidence": {"$ref": "#/$defs/confidence"}
     }, "additionalProperties": true},
     "section": {"type": "object", "required": ["id", "type", "start", "end", "confidence"], "properties": {

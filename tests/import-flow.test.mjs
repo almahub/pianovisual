@@ -345,6 +345,8 @@ test('Piano Lab creates a separate compatible reduction linked to the full song'
   assert.equal(result.song.variantType, 'piano_reduction');
   assert.equal(result.song.derivedFromSongId, imported.songs[0].id);
   assert.equal(result.song.title, 'Skill Source piano');
+  assert.equal(result.song.reductionMode, 'piano_voice');
+  assert.equal(result.song.instruments.includes('Voce / Melodia'), true);
   assert.match(result.song.jsonPath, /^\/library\/jsonpiano\//);
   assert.equal(result.summary.measures, 1);
   assert.equal(Object.values(result.song.reductionRoleSourceIndices).includes(3), false);
@@ -358,8 +360,18 @@ test('Piano Lab creates a separate compatible reduction linked to the full song'
   const reduced = JSON.parse(await fs.readFile(path.join(pianoJsonDir, path.basename(result.song.jsonPath)), 'utf8'));
   assert.equal(reduced.tracksV2.right.length, reduced.measures.length);
   assert.equal(reduced.tracksV2.left.length, reduced.measures.length);
+  const rightPitches = reduced.tracksV2.right.flatMap((measure) => measure.notes.map((note) => note.note));
+  assert.equal(rightPitches.includes(74), false, 'separate voice must not be folded into the piano right hand');
   assert.equal(reduced.original.tracks[3].name, 'Drums');
   assert.equal('reductionRoleSourceIndices' in reduced, false);
+
+  const regenerated = await api('/api/piano-reduction/create', {
+    method: 'POST',
+    body: JSON.stringify({ songId: imported.songs[0].id, arrangementMode: 'piano_solo', replaceExisting: true }),
+  });
+  assert.equal(regenerated.song.id, result.song.id);
+  assert.equal(regenerated.song.reductionMode, 'piano_solo');
+  assert.equal((await api('/api/library')).songs.length, 2);
 });
 
 test('Visualizer selection can be reduced and stored directly in Piano Lab', async () => {
@@ -380,12 +392,15 @@ test('Visualizer selection can be reduced and stored directly in Piano Lab', asy
       songId: imported.songs[0].id,
       sourceJson: filtered,
       selectedInstruments: ['Lead', 'Bass'],
+      arrangementMode: 'piano_solo',
     }),
   });
   assert.deepEqual(result.song.reductionSourceInstruments, ['Lead', 'Bass']);
+  assert.equal(result.song.reductionMode, 'piano_solo');
   const reduced = JSON.parse(await fs.readFile(path.join(pianoJsonDir, path.basename(result.song.jsonPath)), 'utf8'));
   assert.equal(reduced.original.tracks.length, 2);
   assert.deepEqual(reduced.original.tracks.map((track) => track.name), ['Lead', 'Bass']);
+  assert.equal(reduced.tracksV2.right.flatMap((measure) => measure.notes).some((note) => note.note === 74), true);
 });
 
 test('existing piano reductions migrate from json and db.json to the dedicated library', async () => {

@@ -147,6 +147,7 @@ const el = {
   exportVisualizerSelectionBtn: document.getElementById("exportVisualizerSelectionBtn"),
   exportVisualizerToPianoBtn: document.getElementById("exportVisualizerToPianoBtn"),
   pianoReductionCta: document.getElementById("pianoReductionCta"),
+  pianoArrangementMode: document.getElementById("pianoArrangementMode"),
   createPianoReductionBtn: document.getElementById("createPianoReductionBtn"),
   footerTrackTitle: document.getElementById("footerTrackTitle"),
   footerTrackArtist: document.getElementById("footerTrackArtist"),
@@ -799,6 +800,9 @@ function colorFromInstrument(name, past = false) {
   let hash = 0;
   for (let i = 0; i < s.length; i += 1) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
   const hue = hash % 360;
+  if (s.startsWith("Voce / Melodia")) {
+    return past ? "hsl(39 38% 31%)" : "hsl(42 88% 66%)";
+  }
   if (s.startsWith("Accompagnamento ")) {
     return past ? `hsl(${hue} 16% 27%)` : `hsl(${hue} 34% 70%)`;
   }
@@ -1679,7 +1683,7 @@ function renderDetail() {
     `<li><strong>Durata:</strong> ${secondsToClock(song.duration || 0)}</li>`,
     `<li><strong>Tracce attive:</strong> ${activeCount} / ${instruments.length || 0}</li>`,
     `<li><strong>Strumenti:</strong> ${escapeHtml(instruments.join(", ") || "-")}</li>`,
-    song.variantType === "piano_reduction" ? `<li class="piano-origin"><strong>Tipo:</strong> Riduzione pianistica</li>` : "",
+    song.variantType === "piano_reduction" ? `<li class="piano-origin"><strong>Tipo:</strong> ${song.reductionMode === "piano_solo" ? "Piano solo" : "Piano + voce"}</li>` : "",
     `<li><strong>Tag:</strong> ${escapeHtml(tags.join(", ") || "-")}</li>`,
     `<li><strong>Playlist:</strong> ${escapeHtml(playlists.join(", ") || "-")}</li>`,
     `<li><strong>Path JSON:</strong> ${escapeHtml(song.jsonPath || "-")}</li>`,
@@ -1748,15 +1752,22 @@ async function loadPianoEngineStatus() {
 async function createPianoReduction() {
   const song = getSongById(state.selectedSongId);
   if (!song || song.variantType === "piano_reduction") return;
-  if (!confirm(`Creare una riduzione pianistica di “${song.title || "Senza titolo"}”?\n\nIl brano completo resterà invariato.`)) return;
+  const arrangementMode = el.pianoArrangementMode?.value === "piano_solo" ? "piano_solo" : "piano_voice";
+  const modeLabel = arrangementMode === "piano_solo" ? "Piano solo" : "Piano + voce separata";
+  const existing = (state.db?.songs || []).find(
+    (item) => item.variantType === "piano_reduction" && item.derivedFromSongId === song.id,
+  );
+  const replacementNote = existing ? "\nLa riduzione esistente verrà rigenerata senza creare duplicati." : "";
+  if (!confirm(`Creare una riduzione pianistica di “${song.title || "Senza titolo"}”?\n\nModalità: ${modeLabel}.${replacementNote}\nIl brano completo resterà invariato.`)) return;
   showLoading(true);
   if (el.createPianoReductionBtn) el.createPianoReductionBtn.disabled = true;
   try {
     const result = await api("/api/piano-reduction/create", {
       method: "POST",
-      body: JSON.stringify({ songId: song.id }),
+      body: JSON.stringify({ songId: song.id, arrangementMode, replaceExisting: Boolean(existing) }),
     });
     await refreshDb();
+    if (state.player.loadedSongId === result.song.id) state.player.loadedSongId = "";
     state.selectedSongId = result.song.id;
     selectNav("reductions");
     toast(`Riduzione creata: ${result.summary.rightNotes} note mano destra, ${result.summary.leftNotes} mano sinistra`, "ok");
@@ -1846,7 +1857,9 @@ async function createSelectedPianoReductions() {
     const remaining = duplicates.length > 8 ? `\n…e altre ${duplicates.length - 8} copie.` : "";
     duplicateMessage = `\n\nATTENZIONE: rilevate ${duplicates.length} ${duplicates.length === 1 ? "copia doppia" : "copie doppie"}. Verrà convertita una sola copia per brano.\n${details}${remaining}`;
   }
-  if (!confirm(`Convertire ${pending.length} ${pending.length === 1 ? "brano" : "brani"} in versione piano?${skippedMessage}${duplicateMessage}\n\nI brani completi resteranno invariati.`)) return;
+  const arrangementMode = el.pianoArrangementMode?.value === "piano_solo" ? "piano_solo" : "piano_voice";
+  const modeLabel = arrangementMode === "piano_solo" ? "Piano solo" : "Piano + voce separata";
+  if (!confirm(`Convertire ${pending.length} ${pending.length === 1 ? "brano" : "brani"} in versione piano?${skippedMessage}${duplicateMessage}\n\nModalità: ${modeLabel}.\nI brani completi resteranno invariati.`)) return;
 
   showLoading(true);
   const created = [];
@@ -1861,7 +1874,7 @@ async function createSelectedPianoReductions() {
       try {
         const result = await api("/api/piano-reduction/create", {
           method: "POST",
-          body: JSON.stringify({ songId: song.id }),
+          body: JSON.stringify({ songId: song.id, arrangementMode }),
         });
         created.push({ sourceSongId: song.id, sourceTitle: song.title, song: result.song, summary: result.summary });
       } catch (error) {
@@ -1873,6 +1886,7 @@ async function createSelectedPianoReductions() {
       kind: "piano-reduction-batch",
       createdAt: new Date().toISOString(),
       summary: {
+        arrangementMode,
         selected: selectedSongs.length,
         created: created.length,
         alreadyConverted,
@@ -1890,6 +1904,7 @@ async function createSelectedPianoReductions() {
     });
     state.selectedSongIds.clear();
     await refreshDb();
+    if (created.some((item) => item.song.id === state.player.loadedSongId)) state.player.loadedSongId = "";
     if (created.length > 0) {
       state.selectedSongId = created.at(-1).song.id;
       selectNav("reductions");
@@ -2813,8 +2828,10 @@ async function exportVisualizerSelectionToPiano() {
   const existing = (state.db?.songs || []).find(
     (item) => item.variantType === "piano_reduction" && item.derivedFromSongId === song.id,
   );
+  const arrangementMode = el.pianoArrangementMode?.value === "piano_solo" ? "piano_solo" : "piano_voice";
+  const modeLabel = arrangementMode === "piano_solo" ? "Piano solo" : "Piano + voce separata";
   const replaceMessage = existing ? "\n\nLa riduzione piano esistente verrà sostituita." : "";
-  if (!confirm(`Creare la riduzione piano usando ${active.length} ${active.length === 1 ? "traccia selezionata" : "tracce selezionate"}?${replaceMessage}`)) return;
+  if (!confirm(`Creare la riduzione piano usando ${active.length} ${active.length === 1 ? "traccia selezionata" : "tracce selezionate"}?\n\nModalità: ${modeLabel}.${replaceMessage}`)) return;
 
   showLoading(true);
   if (el.exportVisualizerToPianoBtn) el.exportVisualizerToPianoBtn.disabled = true;
@@ -2829,10 +2846,12 @@ async function exportVisualizerSelectionToPiano() {
         songId: song.id,
         sourceJson: filtered,
         selectedInstruments: active,
+        arrangementMode,
         replaceExisting: Boolean(existing),
       }),
     });
     await refreshDb();
+    if (state.player.loadedSongId === result.song.id) state.player.loadedSongId = "";
     state.selectedSongId = result.song.id;
     selectNav("reductions");
     toast(`Esportato su Piano con ${active.length} ${active.length === 1 ? "traccia" : "tracce"}`, "ok");
@@ -3199,24 +3218,32 @@ function extractPianoReductionTracks(jsonData, song = null) {
     Object.values(roleSources).filter((index) => Number.isInteger(index) && index >= 0),
   );
   const originalTracks = Array.isArray(jsonData?.original?.tracks) ? jsonData.original.tracks : [];
+  const sourceTrackGroup = (track, idx, prefix) => {
+    if (!track) return null;
+    const sourceName = repairMojibake(
+      String(track?.name || track?.instrument?.name || `Traccia ${idx + 1}`).trim(),
+    );
+    const instrument = `${prefix} · ${sourceName}`;
+    const notes = (track?.notes || []).map((note) => ({
+      midi: Number(note.midi ?? note.note ?? 60),
+      time: Number(note.time ?? note.start ?? 0),
+      duration: Math.max(0.05, Number(note.duration || 0.2)),
+      velocity: clamp01(Number(note.velocity ?? 0.7)),
+      instrument,
+    }));
+    return notes.length > 0 ? { instrument, notes } : null;
+  };
+  const melodyIndex = Number.isInteger(roleSources.melody) ? roleSources.melody : -1;
+  const voice = song?.reductionMode !== "piano_solo" && melodyIndex >= 0
+    ? sourceTrackGroup(originalTracks[melodyIndex], melodyIndex, "Voce / Melodia")
+    : null;
   const accompaniment = originalTracks
     .map((track, idx) => {
       if (usedSourceIndices.has(idx)) return null;
-      const sourceName = repairMojibake(
-        String(track?.name || track?.instrument?.name || `Traccia ${idx + 1}`).trim(),
-      );
-      const instrument = `Accompagnamento ${idx + 1} · ${sourceName}`;
-      const notes = (track?.notes || []).map((note) => ({
-        midi: Number(note.midi ?? note.note ?? 60),
-        time: Number(note.time ?? note.start ?? 0),
-        duration: Math.max(0.05, Number(note.duration || 0.2)),
-        velocity: clamp01(Number(note.velocity ?? 0.7)),
-        instrument,
-      }));
-      return { instrument, notes };
+      return sourceTrackGroup(track, idx, `Accompagnamento ${idx + 1}`);
     })
     .filter((track) => track?.notes.length > 0);
-  return [...pianoHands, ...accompaniment];
+  return [...pianoHands, ...(voice ? [voice] : []), ...accompaniment];
 }
 
 function extractPlayableTracks(jsonData, fallbackInstruments = [], song = null) {
@@ -3431,6 +3458,18 @@ function drawVisualizerFrame() {
 
   ctx.fillStyle = "#d4e8f5";
   ctx.fillText(`${secondsToClock(current)} / ${secondsToClock(duration)}`, 12, 16);
+  const loadedSong = getSongById(state.player.loadedSongId);
+  const activeChord = (loadedSong?.reductionChords || []).find(
+    (chord) => Number(chord.time) <= current && Number(chord.time) + Number(chord.duration) > current,
+  );
+  if (activeChord?.symbol) {
+    ctx.save();
+    ctx.font = "700 18px Space Grotesk";
+    ctx.textAlign = "right";
+    ctx.fillStyle = "#e2c7ff";
+    ctx.fillText(`Accordo: ${activeChord.symbol}`, canvas.width - 12, 22);
+    ctx.restore();
+  }
   ctx.fillText("Visualizer verticale: note in caduta", 12, strikeY - 6);
 
   if (isPlaying && current >= duration + 0.05) {

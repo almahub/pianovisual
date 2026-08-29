@@ -77,3 +77,38 @@ test("a melody-only selection is not duplicated into harmony or left hand", asyn
     await fs.rm(tempDir, { recursive: true, force: true });
   }
 });
+
+test("piano plus voice keeps melody separate and left hand matches chord inversions", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pianovisual-inversion-test-"));
+  const input = path.join(tempDir, "inversion.json");
+  const output = path.join(tempDir, "reduction.json");
+  try {
+    await fs.writeFile(input, JSON.stringify({
+      title: "C over E",
+      musicalInfo: { tempo: 120, meter: [4, 4], ppq: 480 },
+      tracks: [
+        { name: "Lead Vocal", notes: [
+          { midi: 72, time: 0, duration: 0.5 }, { midi: 74, time: 0.5, duration: 0.5 },
+          { midi: 76, time: 1, duration: 0.5 }, { midi: 77, time: 1.5, duration: 0.5 },
+        ] },
+        { name: "Harmony", notes: [60, 64, 67].map((midi) => ({ midi, time: 0, duration: 2 })) },
+        { name: "Bass", notes: [{ midi: 40, time: 0, duration: 2 }] },
+      ],
+    }), "utf8");
+    await execFileAsync("python3", [
+      path.join(root, "skill/music-to-piano-json/scripts/convert.py"), input, "-o", output,
+      "--format", "normalized", "--arrangement-mode", "piano_voice",
+    ]);
+    const reduction = JSON.parse(await fs.readFile(output, "utf8"));
+    assert.equal(reduction.arrangementMode, "piano_voice");
+    assert.equal(reduction.tracks.find((track) => track.role === "melody").hand, "none");
+    assert.equal(reduction.tracks.find((track) => track.role === "melody").instrument, "voice");
+    assert.equal(reduction.chords[0].symbol, "C/E");
+    for (const note of reduction.tracks.find((track) => track.role === "bass").notes) {
+      const chord = reduction.chords.find((item) => item.time < note.time + note.duration && item.time + item.duration > note.time);
+      assert.equal(note.midi % 12, chord.bassPitchClass);
+    }
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});

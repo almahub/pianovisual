@@ -6,13 +6,13 @@
 - `musicalInfo`: duration, PPQ when meaningful, primary tempo/meter/key, and maps.
 - `sections`: inferred or authored intervals; `family` groups repeated material.
 - `chords`: abstract chord identities, pitch classes, and inversions.
-- `tracks`: playable events. The canonical reduction has melody, harmony, and bass.
+- `tracks`: playable events. The canonical reduction has melody, harmony, and bass. `arrangementMode` determines whether melody is an independent voice (`piano_voice`) or belongs to the piano right hand (`piano_solo`).
 
 Pitch classes use C=0 through B=11. Velocity is normalized to 0-1. Time and duration use seconds. Measures and beats are one-based. Omit unsupported fields rather than guessing.
 
 Confidence describes a particular inference, not overall file quality. Track-role, chord, section, and note confidence are independent.
 
-Chord recognition uses pitch-class evidence over beat-aligned windows. The structured implementation recognizes major, minor, diminished, augmented, sus2, sus4, 6, minor6, 7, major7, minor7, 9, add9, and slash-bass spellings.
+Chord recognition uses velocity- and overlap-weighted pitch-class evidence over beat-aligned windows, continuity smoothing, and the detected bass source. The structured implementation recognizes major, minor, diminished, augmented, sus2, sus4, 6, minor6, 7, major7, minor7, 9, add9, and slash-bass spellings. The bass track must match each chord's declared root or inversion.
 
 Section detection compares measure fingerprints containing chord roots/qualities, melodic contour, rhythmic onset pattern, bass movement, and density. Repetitions share a family. Generic `section` labels are safer than unjustified verse/chorus claims.
 
@@ -20,4 +20,4 @@ Section detection compares measure fingerprints containing chord roots/qualities
 
 The recognized program container is not interchangeable with `piano_reduction_v2`. It retains `supportingTracks`, `tracksV2.right`, `tracksV2.left`, `original.header`, `original.tracks`, `measures`, tempo/key/meter maps, and accompaniment metadata. Both hand arrays must contain exactly one entry per item in `measures`.
 
-Compatibility mode preserves the complete source object and key order while reserializing valid JSON. It rebuilds only the existing `tracksV2` hand arrays from analyzed melody, harmony, and bass. It does not add normalized-only `chords` or `sections` fields, because unknown top-level fields may break strict consumers.
+Compatibility mode preserves the complete source object and key order while reserializing valid JSON. It rebuilds only the existing `tracksV2` hand arrays. In `piano_voice`, the right hand contains harmony and the original melody remains separate; in `piano_solo`, the right hand contains melody plus harmony. It does not add normalized-only analysis fields because unknown top-level fields may break strict consumers.
