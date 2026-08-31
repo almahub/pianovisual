@@ -78,7 +78,7 @@ test("a melody-only selection is not duplicated into harmony or left hand", asyn
   }
 });
 
-test("piano plus voice keeps melody separate and left hand matches chord inversions", async () => {
+test("piano plus voice maps melody right and chord shell plus bass left", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pianovisual-inversion-test-"));
   const input = path.join(tempDir, "inversion.json");
   const output = path.join(tempDir, "reduction.json");
@@ -97,13 +97,21 @@ test("piano plus voice keeps melody separate and left hand matches chord inversi
     }), "utf8");
     await execFileAsync("python3", [
       path.join(root, "skill/music-to-piano-json/scripts/convert.py"), input, "-o", output,
-      "--format", "normalized", "--arrangement-mode", "piano_voice",
+      "--format", "normalized",
     ]);
     const reduction = JSON.parse(await fs.readFile(output, "utf8"));
     assert.equal(reduction.arrangementMode, "piano_voice");
-    assert.equal(reduction.tracks.find((track) => track.role === "melody").hand, "none");
-    assert.equal(reduction.tracks.find((track) => track.role === "melody").instrument, "voice");
+    const melody = reduction.tracks.find((track) => track.role === "melody");
+    const harmony = reduction.tracks.find((track) => track.role === "harmony");
+    assert.equal(melody.hand, "right");
+    assert.equal(melody.instrument, "voice");
+    assert.equal(harmony.hand, "left");
     assert.equal(reduction.chords[0].symbol, "C/E");
+    for (const note of harmony.notes) {
+      const chord = reduction.chords.find((item) => item.time < note.time + note.duration && item.time + item.duration > note.time);
+      assert.equal(note.midi >= 48 && note.midi <= 60, true);
+      assert.notEqual(note.midi % 12, chord.bassPitchClass);
+    }
     for (const note of reduction.tracks.find((track) => track.role === "bass").notes) {
       const chord = reduction.chords.find((item) => item.time < note.time + note.duration && item.time + item.duration > note.time);
       assert.equal(note.midi % 12, chord.bassPitchClass);

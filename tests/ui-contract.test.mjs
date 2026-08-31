@@ -21,7 +21,6 @@ test("ui critical controls exist for key workflows", async () => {
     "libraryToolbar",
     "pianoLabPanel",
     "pianoEngineStatus",
-    "pianoArrangementMode",
     "createPianoReductionBtn",
     "remoteCatalogPanel",
     "remoteCatalogSearch",
@@ -89,14 +88,14 @@ test("instrument toggles update the loaded count and scheduled audio", async () 
   assert.equal(app.includes("if (wasPlaying && hasPlayableNotes) await playPlayer(resumeAt)"), true);
 });
 
-test("piano reductions keep unused source tracks as muted accompaniment groups", async () => {
+test("piano reductions expose melody right and chords plus bass left", async () => {
   const app = await fs.readFile(path.join(root, "app.js"), "utf8");
-  assert.equal(app.includes("song?.reductionRoleSourceIndices"), true);
-  assert.equal(app.includes("usedSourceIndices.has(idx)"), true);
-  assert.equal(app.includes("sourceTrackGroup(track, idx, `Accompagnamento ${idx + 1}`)"), true);
-  assert.equal(app.includes('s.startsWith("Accompagnamento ")'), true);
-  assert.equal(app.includes('sourceTrackGroup(originalTracks[melodyIndex], melodyIndex, "Voce / Melodia")'), true);
-  assert.equal(app.includes('arrangementMode === "piano_solo"'), true);
+  assert.equal(app.includes('{ key: "right", instrument: "Voce / Melodia · mano destra" }'), true);
+  assert.equal(app.includes('{ key: "left", instrument: "Accordi e basso · mano sinistra" }'), true);
+  assert.equal(app.includes("return pianoHands;"), true);
+  assert.equal(app.includes("sourceTrackGroup("), false);
+  assert.equal(app.includes("Accompagnamento ${idx + 1}"), false);
+  assert.equal(app.includes('arrangementMode === "piano_solo"'), false);
   assert.equal(app.includes("loadedSong?.reductionChords"), true);
   assert.equal(app.includes("Accordo: ${activeChord.symbol}"), true);
 });

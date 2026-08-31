@@ -549,26 +549,6 @@ textarea {
   line-height: 1.35;
 }
 
-.piano-reduction-options {
-  display: grid;
-  grid-template-columns: minmax(120px, 1fr) auto;
-  gap: 5px 8px;
-  align-items: end;
-  min-width: 265px;
-}
-
-.piano-reduction-options label {
-  grid-column: 1 / -1;
-  color: #cdb8ff;
-  font-size: 0.64rem;
-  font-weight: 800;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.piano-reduction-options select {
-  min-width: 135px;
-}
 
 .piano-pill {
   color: #cdb8ff;
@@ -2124,10 +2104,6 @@ tbody tr.active {
   .piano-reduction-cta {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .piano-reduction-options {
-    min-width: 0;
   }
 
   .detail-panel .detail-actions:not(.inline) {

@@ -153,8 +153,8 @@ async function readDb() {
   let changed = migrateDbSchema(db);
   for (const song of db.songs) {
     if (song.variantType !== "piano_reduction") continue;
-    if (!song.reductionMode) {
-      song.reductionMode = "piano_solo";
+    if (!song.reductionMode || song.reductionMode === "piano_solo") {
+      song.reductionMode = "legacy";
       changed = true;
     }
     const currentTitle = String(song.title || "Senza titolo").trim();
@@ -340,10 +340,9 @@ async function findPythonRuntime() {
   throw new Error("Python 3 non trovato. Installa Python 3 e riavvia PianoVisual per usare Piano Lab.");
 }
 
-async function runPianoReduction(sourcePath, outputPath, analysisOutputPath = "", arrangementMode = "piano_voice") {
+async function runPianoReduction(sourcePath, outputPath, analysisOutputPath = "") {
   const reductionArgs = [sourcePath, "-o", outputPath, "--format", "program-compatible"];
   if (analysisOutputPath) reductionArgs.push("--analysis-output", analysisOutputPath);
-  reductionArgs.push("--arrangement-mode", arrangementMode);
   const standalone = await standalonePianoEnginePath();
   if (standalone) {
     try {
@@ -871,7 +870,7 @@ async function handleApi(req, res, url) {
 
   if (req.method === "POST" && url.pathname === "/api/piano-reduction/create") {
     const payload = await readBodyJson(req);
-    const arrangementMode = payload.arrangementMode === "piano_solo" ? "piano_solo" : "piano_voice";
+    const arrangementMode = "piano_voice";
     const songId = String(payload.songId || "").trim();
     const db = await readDb();
     const sourceSong = db.songs.find((song) => song.id === songId);
@@ -919,7 +918,7 @@ async function handleApi(req, res, url) {
         reductionSourcePath = path.join(tempDir, "selected-tracks.json");
         await writeJsonAtomic(reductionSourcePath, payload.sourceJson);
       }
-      const engineResult = await runPianoReduction(reductionSourcePath, outputPath, analysisOutputPath, arrangementMode);
+      const engineResult = await runPianoReduction(reductionSourcePath, outputPath, analysisOutputPath);
       const reducedJson = JSON.parse(await fs.readFile(outputPath, "utf8"));
       let roleSourceIndices = {};
       let reductionAnalysis = {};
@@ -971,9 +970,7 @@ async function handleApi(req, res, url) {
         key: sourceSong.key || "",
         bpm: Number(sourceSong.bpm || 120),
         duration: Number(reducedJson.song_length || sourceSong.duration || 0),
-        instruments: arrangementMode === "piano_solo"
-          ? ["Piano mano destra", "Piano mano sinistra"]
-          : ["Piano mano destra", "Piano mano sinistra", "Voce / Melodia"],
+        instruments: ["Voce / Melodia · mano destra", "Accordi e basso · mano sinistra"],
         updatedAt: nowIso(),
         fileHash: reducedHash,
         jsonContentHash: reducedHash,

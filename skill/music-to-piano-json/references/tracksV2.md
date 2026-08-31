@@ -16,20 +16,17 @@ Compatibility mode requires all of these top-level fields:
 - Detect bass using low register, monophony, overlap behavior, and bass name/instrument evidence.
 - Detect harmony using simultaneity/polyphony and middle-register behavior.
 - Infer chords from non-melody sources so melodic passing tones do not alter the accompaniment harmony.
-- Generate reduced harmony voicings from the stabilized active chord sequence with economical voice leading.
+- Generate compact two-note left-hand chord shells from the stabilized active chord sequence with economical voice leading.
 - Align bass timing to the source bass but force its pitch class to the active chord's declared bass; use slash chords for real inversions.
-- In `piano_voice` mode, build `tracksV2.right` from piano harmony and preserve melody/voice as an independent original/supporting source.
-- In `piano_solo` mode, build `tracksV2.right` from melody followed by piano harmony.
-- Build `tracksV2.left` from bass.
+- Build `tracksV2.right` from melody/voice.
+- Build `tracksV2.left` from chord shells followed by bass.
 - Do not invent a missing hand: a melody-only selection produces an empty left hand, while a shared accompaniment source is split by register before hand assignment.
 - Do not stack every source accompaniment track into the right hand.
-- Keep unused source tracks in `original.tracks`; callers may present them separately as supporting accompaniment rather than merging them into either hand.
+- Keep unused source tracks in `original.tracks` for source compatibility, but PianoVisual's reduction player exposes only the melody right hand and the chord/bass left hand.
 
 ## Register rules
 
-- Move harmony upward by octaves while MIDI pitch is below 48.
-- Move harmony downward by octaves while MIDI pitch is above 72.
-- If a harmony note overlaps the melody and lies from three semitones below through one semitone above it, move the harmony note down one octave.
+- Keep chord-shell notes between MIDI 48 and 60 and omit the active bass pitch class from the shell when possible.
 - Move bass upward by octaves while MIDI pitch is below 36.
 - Move bass downward by octaves while MIDI pitch is above 60.
 

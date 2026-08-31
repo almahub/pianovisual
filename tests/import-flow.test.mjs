@@ -346,7 +346,8 @@ test('Piano Lab creates a separate compatible reduction linked to the full song'
   assert.equal(result.song.derivedFromSongId, imported.songs[0].id);
   assert.equal(result.song.title, 'Skill Source piano');
   assert.equal(result.song.reductionMode, 'piano_voice');
-  assert.equal(result.song.instruments.includes('Voce / Melodia'), true);
+  assert.equal(result.song.instruments.includes('Voce / Melodia · mano destra'), true);
+  assert.equal(result.song.instruments.includes('Accordi e basso · mano sinistra'), true);
   assert.match(result.song.jsonPath, /^\/library\/jsonpiano\//);
   assert.equal(result.summary.measures, 1);
   assert.equal(Object.values(result.song.reductionRoleSourceIndices).includes(3), false);
@@ -361,7 +362,10 @@ test('Piano Lab creates a separate compatible reduction linked to the full song'
   assert.equal(reduced.tracksV2.right.length, reduced.measures.length);
   assert.equal(reduced.tracksV2.left.length, reduced.measures.length);
   const rightPitches = reduced.tracksV2.right.flatMap((measure) => measure.notes.map((note) => note.note));
-  assert.equal(rightPitches.includes(74), false, 'separate voice must not be folded into the piano right hand');
+  const leftPitches = reduced.tracksV2.left.flatMap((measure) => measure.notes.map((note) => note.note));
+  assert.equal(rightPitches.includes(74), true, 'voice melody must be visible on the right hand');
+  assert.equal(leftPitches.some((pitch) => pitch < 48), true, 'left hand must retain the bass line');
+  assert.equal(leftPitches.some((pitch) => pitch >= 48 && pitch <= 60), true, 'left hand must contain the compact chord shell');
   assert.equal(reduced.original.tracks[3].name, 'Drums');
   assert.equal('reductionRoleSourceIndices' in reduced, false);
 
@@ -370,7 +374,7 @@ test('Piano Lab creates a separate compatible reduction linked to the full song'
     body: JSON.stringify({ songId: imported.songs[0].id, arrangementMode: 'piano_solo', replaceExisting: true }),
   });
   assert.equal(regenerated.song.id, result.song.id);
-  assert.equal(regenerated.song.reductionMode, 'piano_solo');
+  assert.equal(regenerated.song.reductionMode, 'piano_voice', 'obsolete piano_solo requests must be ignored');
   assert.equal((await api('/api/library')).songs.length, 2);
 });
 
@@ -396,7 +400,7 @@ test('Visualizer selection can be reduced and stored directly in Piano Lab', asy
     }),
   });
   assert.deepEqual(result.song.reductionSourceInstruments, ['Lead', 'Bass']);
-  assert.equal(result.song.reductionMode, 'piano_solo');
+  assert.equal(result.song.reductionMode, 'piano_voice');
   const reduced = JSON.parse(await fs.readFile(path.join(pianoJsonDir, path.basename(result.song.jsonPath)), 'utf8'));
   assert.equal(reduced.original.tracks.length, 2);
   assert.deepEqual(reduced.original.tracks.map((track) => track.name), ['Lead', 'Bass']);
@@ -423,6 +427,7 @@ test('existing piano reductions migrate from json and db.json to the dedicated l
   const merged = await api('/api/library');
   const migrated = merged.songs.find((song) => song.id === 'piano-legacy');
   assert.equal(migrated.title, 'Legacy Song piano');
+  assert.equal(migrated.reductionMode, 'legacy');
   assert.equal(migrated.jsonPath, `/library/jsonpiano/${legacyFileName}`);
   assert.equal(await fs.stat(path.join(pianoJsonDir, legacyFileName)).then(() => true), true);
   await assert.rejects(fs.access(path.join(jsonDir, legacyFileName)));

@@ -147,7 +147,6 @@ const el = {
   exportVisualizerSelectionBtn: document.getElementById("exportVisualizerSelectionBtn"),
   exportVisualizerToPianoBtn: document.getElementById("exportVisualizerToPianoBtn"),
   pianoReductionCta: document.getElementById("pianoReductionCta"),
-  pianoArrangementMode: document.getElementById("pianoArrangementMode"),
   createPianoReductionBtn: document.getElementById("createPianoReductionBtn"),
   footerTrackTitle: document.getElementById("footerTrackTitle"),
   footerTrackArtist: document.getElementById("footerTrackArtist"),
@@ -802,9 +801,6 @@ function colorFromInstrument(name, past = false) {
   const hue = hash % 360;
   if (s.startsWith("Voce / Melodia")) {
     return past ? "hsl(39 38% 31%)" : "hsl(42 88% 66%)";
-  }
-  if (s.startsWith("Accompagnamento ")) {
-    return past ? `hsl(${hue} 16% 27%)` : `hsl(${hue} 34% 70%)`;
   }
   return past ? `hsl(${hue} 30% 30%)` : `hsl(${hue} 78% 62%)`;
 }
@@ -1683,7 +1679,7 @@ function renderDetail() {
     `<li><strong>Durata:</strong> ${secondsToClock(song.duration || 0)}</li>`,
     `<li><strong>Tracce attive:</strong> ${activeCount} / ${instruments.length || 0}</li>`,
     `<li><strong>Strumenti:</strong> ${escapeHtml(instruments.join(", ") || "-")}</li>`,
-    song.variantType === "piano_reduction" ? `<li class="piano-origin"><strong>Tipo:</strong> ${song.reductionMode === "piano_solo" ? "Piano solo" : "Piano + voce"}</li>` : "",
+    song.variantType === "piano_reduction" ? `<li class="piano-origin"><strong>Tipo:</strong> ${song.reductionMode === "piano_voice" ? "Piano + voce" : "Riduzione precedente · rigenerare"}</li>` : "",
     `<li><strong>Tag:</strong> ${escapeHtml(tags.join(", ") || "-")}</li>`,
     `<li><strong>Playlist:</strong> ${escapeHtml(playlists.join(", ") || "-")}</li>`,
     `<li><strong>Path JSON:</strong> ${escapeHtml(song.jsonPath || "-")}</li>`,
@@ -1752,19 +1748,17 @@ async function loadPianoEngineStatus() {
 async function createPianoReduction() {
   const song = getSongById(state.selectedSongId);
   if (!song || song.variantType === "piano_reduction") return;
-  const arrangementMode = el.pianoArrangementMode?.value === "piano_solo" ? "piano_solo" : "piano_voice";
-  const modeLabel = arrangementMode === "piano_solo" ? "Piano solo" : "Piano + voce separata";
   const existing = (state.db?.songs || []).find(
     (item) => item.variantType === "piano_reduction" && item.derivedFromSongId === song.id,
   );
   const replacementNote = existing ? "\nLa riduzione esistente verrà rigenerata senza creare duplicati." : "";
-  if (!confirm(`Creare una riduzione pianistica di “${song.title || "Senza titolo"}”?\n\nModalità: ${modeLabel}.${replacementNote}\nIl brano completo resterà invariato.`)) return;
+  if (!confirm(`Creare una riduzione Piano + voce di “${song.title || "Senza titolo"}”?${replacementNote}\n\nIl brano completo resterà invariato.`)) return;
   showLoading(true);
   if (el.createPianoReductionBtn) el.createPianoReductionBtn.disabled = true;
   try {
     const result = await api("/api/piano-reduction/create", {
       method: "POST",
-      body: JSON.stringify({ songId: song.id, arrangementMode, replaceExisting: Boolean(existing) }),
+      body: JSON.stringify({ songId: song.id, replaceExisting: Boolean(existing) }),
     });
     await refreshDb();
     if (state.player.loadedSongId === result.song.id) state.player.loadedSongId = "";
@@ -1857,9 +1851,7 @@ async function createSelectedPianoReductions() {
     const remaining = duplicates.length > 8 ? `\n…e altre ${duplicates.length - 8} copie.` : "";
     duplicateMessage = `\n\nATTENZIONE: rilevate ${duplicates.length} ${duplicates.length === 1 ? "copia doppia" : "copie doppie"}. Verrà convertita una sola copia per brano.\n${details}${remaining}`;
   }
-  const arrangementMode = el.pianoArrangementMode?.value === "piano_solo" ? "piano_solo" : "piano_voice";
-  const modeLabel = arrangementMode === "piano_solo" ? "Piano solo" : "Piano + voce separata";
-  if (!confirm(`Convertire ${pending.length} ${pending.length === 1 ? "brano" : "brani"} in versione piano?${skippedMessage}${duplicateMessage}\n\nModalità: ${modeLabel}.\nI brani completi resteranno invariati.`)) return;
+  if (!confirm(`Convertire ${pending.length} ${pending.length === 1 ? "brano" : "brani"} in versione Piano + voce?${skippedMessage}${duplicateMessage}\n\nI brani completi resteranno invariati.`)) return;
 
   showLoading(true);
   const created = [];
@@ -1874,7 +1866,7 @@ async function createSelectedPianoReductions() {
       try {
         const result = await api("/api/piano-reduction/create", {
           method: "POST",
-          body: JSON.stringify({ songId: song.id, arrangementMode }),
+          body: JSON.stringify({ songId: song.id }),
         });
         created.push({ sourceSongId: song.id, sourceTitle: song.title, song: result.song, summary: result.summary });
       } catch (error) {
@@ -1886,7 +1878,7 @@ async function createSelectedPianoReductions() {
       kind: "piano-reduction-batch",
       createdAt: new Date().toISOString(),
       summary: {
-        arrangementMode,
+        arrangementMode: "piano_voice",
         selected: selectedSongs.length,
         created: created.length,
         alreadyConverted,
@@ -2828,10 +2820,8 @@ async function exportVisualizerSelectionToPiano() {
   const existing = (state.db?.songs || []).find(
     (item) => item.variantType === "piano_reduction" && item.derivedFromSongId === song.id,
   );
-  const arrangementMode = el.pianoArrangementMode?.value === "piano_solo" ? "piano_solo" : "piano_voice";
-  const modeLabel = arrangementMode === "piano_solo" ? "Piano solo" : "Piano + voce separata";
   const replaceMessage = existing ? "\n\nLa riduzione piano esistente verrà sostituita." : "";
-  if (!confirm(`Creare la riduzione piano usando ${active.length} ${active.length === 1 ? "traccia selezionata" : "tracce selezionate"}?\n\nModalità: ${modeLabel}.${replaceMessage}`)) return;
+  if (!confirm(`Creare la riduzione Piano + voce usando ${active.length} ${active.length === 1 ? "traccia selezionata" : "tracce selezionate"}?${replaceMessage}`)) return;
 
   showLoading(true);
   if (el.exportVisualizerToPianoBtn) el.exportVisualizerToPianoBtn.disabled = true;
@@ -2846,7 +2836,6 @@ async function exportVisualizerSelectionToPiano() {
         songId: song.id,
         sourceJson: filtered,
         selectedInstruments: active,
-        arrangementMode,
         replaceExisting: Boolean(existing),
       }),
     });
@@ -3194,8 +3183,8 @@ function animateMiniVisualizer() {
 
 function extractPianoReductionTracks(jsonData, song = null) {
   const hands = [
-    { key: "right", instrument: "Piano mano destra" },
-    { key: "left", instrument: "Piano mano sinistra" },
+    { key: "right", instrument: "Voce / Melodia · mano destra" },
+    { key: "left", instrument: "Accordi e basso · mano sinistra" },
   ];
   const pianoHands = hands
     .map(({ key, instrument }) => {
@@ -3212,38 +3201,7 @@ function extractPianoReductionTracks(jsonData, song = null) {
     })
     .filter((track) => track.notes.length > 0);
 
-  const roleSources = song?.reductionRoleSourceIndices;
-  if (!roleSources || typeof roleSources !== "object") return pianoHands;
-  const usedSourceIndices = new Set(
-    Object.values(roleSources).filter((index) => Number.isInteger(index) && index >= 0),
-  );
-  const originalTracks = Array.isArray(jsonData?.original?.tracks) ? jsonData.original.tracks : [];
-  const sourceTrackGroup = (track, idx, prefix) => {
-    if (!track) return null;
-    const sourceName = repairMojibake(
-      String(track?.name || track?.instrument?.name || `Traccia ${idx + 1}`).trim(),
-    );
-    const instrument = `${prefix} · ${sourceName}`;
-    const notes = (track?.notes || []).map((note) => ({
-      midi: Number(note.midi ?? note.note ?? 60),
-      time: Number(note.time ?? note.start ?? 0),
-      duration: Math.max(0.05, Number(note.duration || 0.2)),
-      velocity: clamp01(Number(note.velocity ?? 0.7)),
-      instrument,
-    }));
-    return notes.length > 0 ? { instrument, notes } : null;
-  };
-  const melodyIndex = Number.isInteger(roleSources.melody) ? roleSources.melody : -1;
-  const voice = song?.reductionMode !== "piano_solo" && melodyIndex >= 0
-    ? sourceTrackGroup(originalTracks[melodyIndex], melodyIndex, "Voce / Melodia")
-    : null;
-  const accompaniment = originalTracks
-    .map((track, idx) => {
-      if (usedSourceIndices.has(idx)) return null;
-      return sourceTrackGroup(track, idx, `Accompagnamento ${idx + 1}`);
-    })
-    .filter((track) => track?.notes.length > 0);
-  return [...pianoHands, ...(voice ? [voice] : []), ...accompaniment];
+  return pianoHands;
 }
 
 function extractPlayableTracks(jsonData, fallbackInstruments = [], song = null) {

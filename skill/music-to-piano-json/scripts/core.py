@@ -286,19 +286,19 @@ def _align_notes_to_chords(notes,chords,low,high,melody=None):
             n['time']=round(start,6);n['duration']=round(end-start,6);aligned.append(n)
     return sorted(aligned,key=lambda n:(n['time'],n['midi']))
 
-def _chord_voicings(chords,melody=None):
-    melody=melody or []; out=[]; previous=[]
+def _left_hand_chord_voicings(chords):
+    out=[]; previous=[]
     for chord in chords:
         if float(chord.get('confidence',0))<MIN_PLAYABLE_CHORD_CONFIDENCE:continue
-        pcs=set(chord['pitchClasses']); candidates=[pitch for pitch in range(48,73) if pitch%12 in pcs]
-        target_count=min(3,len(pcs)); best=None
+        pcs=set(chord['pitchClasses']); bass_pc=int(chord.get('bassPitchClass',chord['root']))
+        shell_pcs=pcs-{bass_pc} if len(pcs)>1 else pcs
+        candidates=[pitch for pitch in range(48,61) if pitch%12 in shell_pcs]
+        target_count=min(2,len(shell_pcs)); best=None
         from itertools import combinations
         for voicing in combinations(candidates,target_count):
             if any(b-a<3 for a,b in zip(voicing,voicing[1:])):continue
-            simultaneous=[n for n in melody if n['time']<chord['time']+chord['duration'] and n['time']+n['duration']>chord['time']]
-            collisions=sum(1 for pitch in voicing for note in simultaneous if -3<=pitch-note['midi']<=1)
             movement=sum(min(abs(pitch-old) for old in previous) for pitch in voicing) if previous else sum(abs(pitch-60) for pitch in voicing)
-            score=collisions*100+movement+max(voicing)-min(voicing)
+            score=movement+max(voicing)-min(voicing)
             if best is None or score<best[0]:best=(score,voicing)
         voicing=list(best[1]) if best else sorted(candidates,key=lambda pitch:abs(pitch-60))[:target_count]
         previous=voicing
@@ -325,7 +325,7 @@ def _align_bass_to_chords(notes,chords):
               'confidence':min(float(source.get('confidence',1)),float(chord['confidence']))});aligned.append(n)
     return sorted(aligned,key=lambda n:(n['time'],n['midi']))
 
-def reduce(tracks,info,chords=None,classification=None,arrangement_mode='piano_voice'):
+def reduce(tracks,info,chords=None,classification=None):
     mi,hi,bi,fs=classification or classify(tracks); melody=[dict(n) for n in tracks[mi]['notes']]
     # A reduction must remain playable: use the strongest harmonic source instead
     # of stacking every orchestral accompaniment track into one piano hand.
@@ -334,11 +334,11 @@ def reduce(tracks,info,chords=None,classification=None,arrangement_mode='piano_v
     if hi==bi and len(tracks)>1:
         source_h=[n for n in source_h if n['midi']>=48]
         source_b=[n for n in source_b if n['midi']<60]
-    harmony=_chord_voicings(chords or [],melody if arrangement_mode=='piano_solo' else []) if source_h else []
+    harmony=_left_hand_chord_voicings(chords or []) if source_h else []
     bass=_align_bass_to_chords(source_b,chords or [])
     return [
-      {'id':'melody','name':'Voce / Melodia','role':'melody','hand':'right' if arrangement_mode=='piano_solo' else 'none','instrument':'piano' if arrangement_mode=='piano_solo' else 'voice','sourceTrackIndex':tracks[mi].get('sourceTrackIndex',mi),'confidence':round(fs[mi]['melody'],3),'notes':melody},
-      {'id':'harmony','name':'Armonia pianistica','role':'harmony','hand':'right','instrument':'piano','sourceTrackIndex':tracks[hi].get('sourceTrackIndex',hi),'confidence':round(fs[hi]['harmony'],3),'notes':harmony},
+      {'id':'melody','name':'Voce / Melodia','role':'melody','hand':'right','instrument':'voice','sourceTrackIndex':tracks[mi].get('sourceTrackIndex',mi),'confidence':round(fs[mi]['melody'],3),'notes':melody},
+      {'id':'harmony','name':'Accordi mano sinistra','role':'harmony','hand':'left','instrument':'piano','sourceTrackIndex':tracks[hi].get('sourceTrackIndex',hi),'confidence':round(fs[hi]['harmony'],3),'notes':harmony},
       {'id':'bass','name':'Basso','role':'bass','hand':'left','instrument':'piano','sourceTrackIndex':tracks[bi].get('sourceTrackIndex',bi),'confidence':round(fs[bi]['bass'],3),'notes':bass}]
 
 def sections(chords,info):
@@ -370,23 +370,23 @@ def crop(tracks,info,start,end):
     info['duration']=end-start
     return tracks,info
 
-def build(path,start=0,end=None,title=None,artist=None,arrangement_mode='piano_voice'):
+def build(path,start=0,end=None,title=None,artist=None):
     kind=inspect_input(path); parser={'json':parse_json,'midi':parse_midi,'musicxml':parse_musicxml}[kind]; tracks,info=parser(path)
     tracks,info=crop(tracks,info,start,end); tracks=[t for t in tracks if t['notes']]
     if not tracks:raise ValueError('Selected interval contains no notes')
     classification=classify(tracks);melody_index=classification[0]
     bass_index=classification[2];harmonic_tracks=[track for index,track in enumerate(tracks) if index!=melody_index and not classification[3][index].get('support')]
-    chords=infer_chords(harmonic_tracks,info,tracks[bass_index] if harmonic_tracks else None) if harmonic_tracks else []; reduced=reduce(tracks,info,chords,classification,arrangement_mode)
+    chords=infer_chords(harmonic_tracks,info,tracks[bass_index] if harmonic_tracks else None) if harmonic_tracks else []; reduced=reduce(tracks,info,chords,classification)
     return {'format':'piano_reduction_v2','title':title or info.pop('title',Path(path).stem),'artist':artist if artist is not None else info.pop('artist',''),
       'source':{'filename':Path(path).name,'type':kind,'analysis_mode':'structured','confidence':1.0},'musicalInfo':info,
-      'arrangementMode':arrangement_mode,'sections':sections(chords,info),'chords':chords,'tracks':reduced}
+      'arrangementMode':'piano_voice','sections':sections(chords,info),'chords':chords,'tracks':reduced}
 
 def validate(d):
     errors=[]
     if d.get('format')!='piano_reduction_v2':errors.append('wrong format')
     roles=[t.get('role') for t in d.get('tracks',[])]
     if roles!=['melody','harmony','bass']:errors.append('tracks must be melody, harmony, bass')
-    if d.get('arrangementMode') not in ('piano_solo','piano_voice'):errors.append('invalid arrangement mode')
+    if d.get('arrangementMode')!='piano_voice':errors.append('invalid arrangement mode')
     for tr in d.get('tracks',[]):
         for n in tr.get('notes',[]):
             if not 0<=n.get('midi',-1)<=127 or n.get('duration',0)<=0:errors.append(f'invalid note in {tr.get("id")}')

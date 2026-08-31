@@ -31,11 +31,11 @@ The scripts use only Python's standard library. They accept `.json`, `.mid`, `.m
 - Keep `chords` distinct from `harmony`: chords describe harmonic identity; harmony notes encode a piano voicing generated from the stabilized chord sequence.
 - Infer chord identity from accompaniment and bass after excluding the detected melody, so passing melody tones do not create false chord extensions.
 - Split harmony and bass notes at chord boundaries when necessary and keep their pitch classes inside the active chord; melody may retain intentional non-chord tones.
-- Produce logical `melody`, `harmony`, and `bass` tracks. In the default `piano_voice` mode melody/voice stays independent, harmony uses the right hand, and bass uses the left. In `piano_solo`, melody joins harmony in the right hand.
+- Produce three logical roles but map them to two playable hands: melody/voice to the right hand; a compact two-note chord shell plus bass to the left hand.
 - Make every harmony note a member of the active chord. Make every bass note match the chord's declared bass pitch class; use a slash-chord symbol when that bass is not the root.
 - Stabilize beat-level harmony so a single low-confidence passing event cannot create a fleeting chord change between equal neighbors.
 - When the user selects only a melodic source, keep harmony and bass empty instead of duplicating the melody into missing hands. With a shared accompaniment source, separate middle-register harmony from low-register bass.
-- Avoid harmony notes within three semitones below or one semitone above a simultaneous melody note. Keep accompaniment approximately C3-C5 and bass approximately C2-C4 by octave displacement.
+- Keep left-hand chord shells approximately C3-C4 and bass approximately C2-C4. Exclude the declared bass pitch class from the chord shell when other chord tones are available.
 - Preserve structured timing. If an input has no reliable beat grid, omit unsupported measure/beat fields instead of inventing them.
 - Infer sections from repeated bar-level harmonic, melodic, rhythmic, bass, and density fingerprints. Use `family` for related repetitions. Use generic `section` when verse/chorus evidence is weak.
 - Use confidence below 1.0 for inferred roles, chords, keys, or sections. Source-authored timing and metadata may use 1.0.
@@ -45,11 +45,11 @@ The scripts use only Python's standard library. They accept `.json`, `.mid`, `.m
 
 Use these output modes:
 
-- `--format auto` (default): when the input has `tracksV2`, `supportingTracks`, `original`, `measures`, and related program fields, preserve the container, rebuild `tracksV2.right` from detected melody plus reduced harmony, rebuild `tracksV2.left` from bass, and validate hand/measure alignment. For other inputs, emit normalized JSON.
+- `--format auto` (default): when the input has `tracksV2`, `supportingTracks`, `original`, `measures`, and related program fields, preserve the container, rebuild `tracksV2.right` from melody/voice, rebuild `tracksV2.left` from compact chord shells plus bass, and validate hand/measure alignment. For other inputs, emit normalized JSON.
 - `--format program-compatible`: require the recognized program container; fail if required proprietary fields are absent. Repair only a UTF-8 BOM or the observed unambiguous `1{` prefix. Do not silently repair arbitrary malformed JSON.
 - `--format normalized`: always emit `piano_reduction_v2` after musical analysis.
 
-Choose the arrangement explicitly with `--arrangement-mode piano_voice` (default) or `--arrangement-mode piano_solo`. Prefer `piano_voice` for sung or lead-melody material because it prevents the melody and accompaniment from being hidden inside one right-hand stream.
+The only arrangement is `piano_voice`: melody/voice is the right-hand line, while chords and bass form the left-hand accompaniment. Do not expose or generate another variant.
 
 Do not crop excerpts in program-compatible mode because doing so safely requires coordinated rewriting of measures, both hands, supporting tracks, maps, and the embedded original. Use normalized mode for `--start`/`--end`.
 

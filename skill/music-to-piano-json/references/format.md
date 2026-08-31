@@ -6,7 +6,7 @@
 - `musicalInfo`: duration, PPQ when meaningful, primary tempo/meter/key, and maps.
 - `sections`: inferred or authored intervals; `family` groups repeated material.
 - `chords`: abstract chord identities, pitch classes, and inversions.
-- `tracks`: playable events. The canonical reduction has melody, harmony, and bass. `arrangementMode` determines whether melody is an independent voice (`piano_voice`) or belongs to the piano right hand (`piano_solo`).
+- `tracks`: playable events. The canonical reduction maps melody/voice to the right hand and maps harmony plus bass to the left hand. `arrangementMode` is always `piano_voice`.
 
 Pitch classes use C=0 through B=11. Velocity is normalized to 0-1. Time and duration use seconds. Measures and beats are one-based. Omit unsupported fields rather than guessing.
 
@@ -20,4 +20,4 @@ Section detection compares measure fingerprints containing chord roots/qualities
 
 The recognized program container is not interchangeable with `piano_reduction_v2`. It retains `supportingTracks`, `tracksV2.right`, `tracksV2.left`, `original.header`, `original.tracks`, `measures`, tempo/key/meter maps, and accompaniment metadata. Both hand arrays must contain exactly one entry per item in `measures`.
 
-Compatibility mode preserves the complete source object and key order while reserializing valid JSON. It rebuilds only the existing `tracksV2` hand arrays. In `piano_voice`, the right hand contains harmony and the original melody remains separate; in `piano_solo`, the right hand contains melody plus harmony. It does not add normalized-only analysis fields because unknown top-level fields may break strict consumers.
+Compatibility mode preserves the complete source object and key order while reserializing valid JSON. It rebuilds only the existing `tracksV2` hand arrays: right contains melody/voice, while left contains compact chord shells and bass. It does not add normalized-only analysis fields because unknown top-level fields may break strict consumers.
