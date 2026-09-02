@@ -16,19 +16,19 @@ Compatibility mode requires all of these top-level fields:
 - Detect bass using low register, monophony, overlap behavior, and bass name/instrument evidence.
 - Detect harmony using simultaneity/polyphony and middle-register behavior.
 - Infer chords from non-melody sources so melodic passing tones do not alter the accompaniment harmony.
-- Generate compact two-note left-hand chord shells from the stabilized active chord sequence with economical voice leading.
-- Align bass timing to the source bass but force its pitch class to the active chord's declared bass; use slash chords for real inversions.
+- Generate one stable bass note and one characteristic chord tone for every stabilized chord, with economical voice leading.
+- Use the active chord's declared bass pitch class; use slash chords for real inversions. Do not copy a busy source-bass rhythm into the reduced left hand.
 - Build `tracksV2.right` from melody/voice.
-- Build `tracksV2.left` from chord shells followed by bass.
+- Build `tracksV2.left` from the paired guide tone and bass, for at most two simultaneous notes.
 - Do not invent a missing hand: a melody-only selection produces an empty left hand, while a shared accompaniment source is split by register before hand assignment.
 - Do not stack every source accompaniment track into the right hand.
 - Keep unused source tracks in `original.tracks` for source compatibility, but PianoVisual's reduction player exposes only the melody right hand and the chord/bass left hand.
 
 ## Register rules
 
-- Keep chord-shell notes between MIDI 48 and 60 and omit the active bass pitch class from the shell when possible.
-- Move bass upward by octaves while MIDI pitch is below 36.
-- Move bass downward by octaves while MIDI pitch is above 60.
+- Keep the bass between MIDI 40 and 51.
+- Place the guide tone above the bass and no farther than 12 semitones away; prefer a distance of at least 3 semitones.
+- Omit the active bass pitch class from the guide tone when another chord tone is available.
 
 ## Time conversion
 

@@ -78,7 +78,7 @@ test("a melody-only selection is not duplicated into harmony or left hand", asyn
   }
 });
 
-test("piano plus voice maps melody right and chord shell plus bass left", async () => {
+test("piano plus voice maps melody right and an easy bass-guide dyad left", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pianovisual-inversion-test-"));
   const input = path.join(tempDir, "inversion.json");
   const output = path.join(tempDir, "reduction.json");
@@ -92,7 +92,7 @@ test("piano plus voice maps melody right and chord shell plus bass left", async 
           { midi: 76, time: 1, duration: 0.5 }, { midi: 77, time: 1.5, duration: 0.5 },
         ] },
         { name: "Harmony", notes: [60, 64, 67].map((midi) => ({ midi, time: 0, duration: 2 })) },
-        { name: "Bass", notes: [{ midi: 40, time: 0, duration: 2 }] },
+        { name: "Bass", notes: [0, 0.5, 1, 1.5].map((time) => ({ midi: 40, time, duration: 0.5 })) },
       ],
     }), "utf8");
     await execFileAsync("python3", [
@@ -107,13 +107,20 @@ test("piano plus voice maps melody right and chord shell plus bass left", async 
     assert.equal(melody.instrument, "voice");
     assert.equal(harmony.hand, "left");
     assert.equal(reduction.chords[0].symbol, "C/E");
+    const bass = reduction.tracks.find((track) => track.role === "bass");
+    assert.equal(harmony.notes.length, reduction.chords.length, "use only one guide tone per stable chord");
+    assert.equal(bass.notes.length, reduction.chords.length, "do not copy a busy source-bass rhythm");
     for (const note of harmony.notes) {
       const chord = reduction.chords.find((item) => item.time < note.time + note.duration && item.time + item.duration > note.time);
-      assert.equal(note.midi >= 48 && note.midi <= 60, true);
+      const pairedBass = bass.notes.find((item) => item.time === note.time && item.duration === note.duration);
+      assert.ok(pairedBass, "every guide tone must have one paired bass note");
+      assert.equal(note.midi > pairedBass.midi, true);
+      assert.equal(note.midi - pairedBass.midi <= 12, true, "left-hand span must not exceed one octave");
       assert.notEqual(note.midi % 12, chord.bassPitchClass);
     }
-    for (const note of reduction.tracks.find((track) => track.role === "bass").notes) {
+    for (const note of bass.notes) {
       const chord = reduction.chords.find((item) => item.time < note.time + note.duration && item.time + item.duration > note.time);
+      assert.equal(note.midi >= 40 && note.midi <= 51, true);
       assert.equal(note.midi % 12, chord.bassPitchClass);
     }
   } finally {

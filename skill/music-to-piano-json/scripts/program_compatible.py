@@ -73,8 +73,8 @@ def _tempo_segments(data):
     return seconds_to_ticks
 
 def rebuild_tracks_v2(data,source):
-    from core import build
-    reduction=build(source); roles={x['role']:x['notes'] for x in reduction['tracks']}
+    from core import build,validate
+    reduction=build(source);validate(reduction);roles={x['role']:x['notes'] for x in reduction['tracks']}
     hands={'right':roles['melody'],'left':roles['harmony']+roles['bass']}
     to_ticks=_tempo_segments(data); measures=data['measures']; starts=[int(x['ticksStart']) for x in measures]; ppq=int(data['resolution'])
     rebuilt={}

@@ -286,26 +286,30 @@ def _align_notes_to_chords(notes,chords,low,high,melody=None):
             n['time']=round(start,6);n['duration']=round(end-start,6);aligned.append(n)
     return sorted(aligned,key=lambda n:(n['time'],n['midi']))
 
-def _left_hand_chord_voicings(chords):
-    out=[]; previous=[]
+def _easy_left_hand(chords):
+    harmony=[];bass=[];previous_guide=None
     for chord in chords:
         if float(chord.get('confidence',0))<MIN_PLAYABLE_CHORD_CONFIDENCE:continue
         pcs=set(chord['pitchClasses']); bass_pc=int(chord.get('bassPitchClass',chord['root']))
         shell_pcs=pcs-{bass_pc} if len(pcs)>1 else pcs
-        candidates=[pitch for pitch in range(48,61) if pitch%12 in shell_pcs]
-        target_count=min(2,len(shell_pcs)); best=None
-        from itertools import combinations
-        for voicing in combinations(candidates,target_count):
-            if any(b-a<3 for a,b in zip(voicing,voicing[1:])):continue
-            movement=sum(min(abs(pitch-old) for old in previous) for pitch in voicing) if previous else sum(abs(pitch-60) for pitch in voicing)
-            score=movement+max(voicing)-min(voicing)
-            if best is None or score<best[0]:best=(score,voicing)
-        voicing=list(best[1]) if best else sorted(candidates,key=lambda pitch:abs(pitch-60))[:target_count]
-        previous=voicing
-        for pitch in voicing:
-            out.append({'midi':pitch,'name':note_name(pitch),'time':chord['time'],'duration':chord['duration'],
-              'velocity':.62,'confidence':chord['confidence']})
-    return out
+        # Keep the entire hand inside one octave: one stable bass note and one
+        # characteristic chord tone.  This avoids the former three-note spans
+        # that could stretch close to two octaves or overlap a moving bass line.
+        bass_pitch=next(pitch for pitch in range(40,52) if pitch%12==bass_pc)
+        preferred_intervals=(3,4,10,11,9,0,5,2,6,8,7)
+        priority={(int(chord['root'])+interval)%12:index for index,interval in enumerate(preferred_intervals)}
+        candidates=[pitch for pitch in range(bass_pitch+3,bass_pitch+13) if pitch%12 in shell_pcs]
+        if not candidates:
+            candidates=[pitch for pitch in range(bass_pitch+1,bass_pitch+13) if pitch%12 in shell_pcs]
+        if not candidates:continue
+        def guide_score(pitch):
+            movement=abs(pitch-previous_guide) if previous_guide is not None else abs(pitch-52)
+            return priority.get(pitch%12,99)*20+movement+abs((pitch-bass_pitch)-7)*.25
+        guide_pitch=min(candidates,key=guide_score);previous_guide=guide_pitch
+        common={'time':chord['time'],'duration':chord['duration'],'confidence':chord['confidence']}
+        bass.append({'midi':bass_pitch,'name':note_name(bass_pitch),'velocity':.62,**common})
+        harmony.append({'midi':guide_pitch,'name':note_name(guide_pitch),'velocity':.56,**common})
+    return harmony,bass
 
 def _align_bass_to_chords(notes,chords):
     if not chords:return _align_notes_to_chords(notes,[],36,60)
@@ -334,8 +338,10 @@ def reduce(tracks,info,chords=None,classification=None):
     if hi==bi and len(tracks)>1:
         source_h=[n for n in source_h if n['midi']>=48]
         source_b=[n for n in source_b if n['midi']<60]
-    harmony=_left_hand_chord_voicings(chords or []) if source_h else []
-    bass=_align_bass_to_chords(source_b,chords or [])
+    if chords and (source_h or source_b):
+        harmony,bass=_easy_left_hand(chords)
+    else:
+        harmony=[];bass=_align_bass_to_chords(source_b,[])
     return [
       {'id':'melody','name':'Voce / Melodia','role':'melody','hand':'right','instrument':'voice','sourceTrackIndex':tracks[mi].get('sourceTrackIndex',mi),'confidence':round(fs[mi]['melody'],3),'notes':melody},
       {'id':'harmony','name':'Accordi mano sinistra','role':'harmony','hand':'left','instrument':'piano','sourceTrackIndex':tracks[hi].get('sourceTrackIndex',hi),'confidence':round(fs[hi]['harmony'],3),'notes':harmony},
@@ -391,12 +397,25 @@ def validate(d):
         for n in tr.get('notes',[]):
             if not 0<=n.get('midi',-1)<=127 or n.get('duration',0)<=0:errors.append(f'invalid note in {tr.get("id")}')
     chords=d.get('chords',[])
+    harmony_track=next((item for item in d.get('tracks',[]) if item.get('role')=='harmony'),{'notes':[]})
+    bass_track=next((item for item in d.get('tracks',[]) if item.get('role')=='bass'),{'notes':[]})
     for role in ('harmony','bass'):
         tr=next((item for item in d.get('tracks',[]) if item.get('role')==role),{'notes':[]})
         for note in tr['notes']:
             active=[chord for chord in chords if chord['time']<note['time']+note['duration']-1e-6 and chord['time']+chord['duration']>note['time']+1e-6]
             if active and any(note['midi']%12 not in chord['pitchClasses'] for chord in active):errors.append(f'{role} note outside active chord')
             if role=='bass' and active and any(note['midi']%12!=chord.get('bassPitchClass',chord['root']) for chord in active):errors.append('bass note does not match chord bass')
+    for note in harmony_track['notes']:
+        paired=next((bass for bass in bass_track['notes'] if abs(bass['time']-note['time'])<1e-6 and abs(bass['duration']-note['duration'])<1e-6),None)
+        if paired is None:errors.append('left-hand guide tone has no paired bass')
+        elif note['midi']<=paired['midi'] or note['midi']-paired['midi']>12:errors.append('left-hand span is not playable')
+    events=[]
+    for note in harmony_track['notes']+bass_track['notes']:
+        events.extend(((note['time'],1),(note['time']+note['duration'],-1)))
+    active=0
+    for _,kind in sorted(events):
+        active+=kind
+        if active>2:errors.append('left hand exceeds two simultaneous notes');break
     for s in d.get('sections',[]):
         if s['end']<=s['start']:errors.append(f'invalid section {s["id"]}')
     if errors:raise ValueError('; '.join(errors))
