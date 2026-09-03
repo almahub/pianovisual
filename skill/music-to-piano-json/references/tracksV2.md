@@ -16,10 +16,10 @@ Compatibility mode requires all of these top-level fields:
 - Detect bass using low register, monophony, overlap behavior, and bass name/instrument evidence.
 - Detect harmony using simultaneity/polyphony and middle-register behavior.
 - Infer chords from non-melody sources so melodic passing tones do not alter the accompaniment harmony.
-- Generate one stable bass note and one characteristic chord tone for every stabilized chord, with economical voice leading.
+- Generate one stable bass note and normally two characteristic chord tones for every stabilized chord, with economical voice leading.
 - Use the active chord's declared bass pitch class; use slash chords for real inversions. Do not copy a busy source-bass rhythm into the reduced left hand.
 - Build `tracksV2.right` from melody/voice.
-- Build `tracksV2.left` from the paired guide tone and bass, for at most two simultaneous notes.
+- Build `tracksV2.left` from the bass and upper chord tones: normally three simultaneous notes. A confidently recognized seventh chord may use four only when all adjacent intervals are comfortable.
 - Do not invent a missing hand: a melody-only selection produces an empty left hand, while a shared accompaniment source is split by register before hand assignment.
 - Do not stack every source accompaniment track into the right hand.
 - Keep unused source tracks in `original.tracks` for source compatibility, but PianoVisual's reduction player exposes only the melody right hand and the chord/bass left hand.
@@ -27,8 +27,9 @@ Compatibility mode requires all of these top-level fields:
 ## Register rules
 
 - Keep the bass between MIDI 40 and 51.
-- Place the guide tone above the bass and no farther than 12 semitones away; prefer a distance of at least 3 semitones.
-- Omit the active bass pitch class from the guide tone when another chord tone is available.
+- Place all upper chord tones above the bass and keep the complete hand within 12 semitones.
+- Require at least 2 semitones between adjacent fingers. If a four-note voicing violates this rule, fall back to three notes; continue reducing only when necessary.
+- Omit the active bass pitch class from upper chord tones when other chord tones are available.
 
 ## Time conversion
 

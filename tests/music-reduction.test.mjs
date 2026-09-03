@@ -78,7 +78,7 @@ test("a melody-only selection is not duplicated into harmony or left hand", asyn
   }
 });
 
-test("piano plus voice maps melody right and an easy bass-guide dyad left", async () => {
+test("piano plus voice maps melody right and a compact three-note chord left", async () => {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pianovisual-inversion-test-"));
   const input = path.join(tempDir, "inversion.json");
   const output = path.join(tempDir, "reduction.json");
@@ -108,7 +108,7 @@ test("piano plus voice maps melody right and an easy bass-guide dyad left", asyn
     assert.equal(harmony.hand, "left");
     assert.equal(reduction.chords[0].symbol, "C/E");
     const bass = reduction.tracks.find((track) => track.role === "bass");
-    assert.equal(harmony.notes.length, reduction.chords.length, "use only one guide tone per stable chord");
+    assert.equal(harmony.notes.length, reduction.chords.length * 2, "use two guide tones per stable chord");
     assert.equal(bass.notes.length, reduction.chords.length, "do not copy a busy source-bass rhythm");
     for (const note of harmony.notes) {
       const chord = reduction.chords.find((item) => item.time < note.time + note.duration && item.time + item.duration > note.time);
@@ -120,9 +120,45 @@ test("piano plus voice maps melody right and an easy bass-guide dyad left", asyn
     }
     for (const note of bass.notes) {
       const chord = reduction.chords.find((item) => item.time < note.time + note.duration && item.time + item.duration > note.time);
+      const chordTones = harmony.notes.filter((item) => item.time === note.time && item.duration === note.duration);
+      const pitches = [note.midi, ...chordTones.map((item) => item.midi)].sort((a, b) => a - b);
+      assert.equal(pitches.length, 3);
+      assert.equal(pitches.at(-1) - pitches[0] <= 12, true);
+      assert.equal(pitches.slice(1).every((pitch, index) => pitch - pitches[index] >= 2), true);
       assert.equal(note.midi >= 40 && note.midi <= 51, true);
       assert.equal(note.midi % 12, chord.bassPitchClass);
     }
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("a clear seventh chord may use a comfortable fourth left-hand note", async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pianovisual-seventh-test-"));
+  const input = path.join(tempDir, "seventh.json");
+  const output = path.join(tempDir, "reduction.json");
+  try {
+    await fs.writeFile(input, JSON.stringify({
+      title: "C7",
+      musicalInfo: { tempo: 120, meter: [4, 4], ppq: 480 },
+      tracks: [
+        { name: "Lead Vocal", notes: [72, 74, 76, 77].map((midi, index) => ({ midi, time: index * 0.5, duration: 0.5 })) },
+        { name: "Harmony", notes: [60, 64, 67, 70].map((midi) => ({ midi, time: 0, duration: 2 })) },
+        { name: "Bass", notes: [{ midi: 36, time: 0, duration: 2 }] },
+      ],
+    }), "utf8");
+    await execFileAsync("python3", [
+      path.join(root, "skill/music-to-piano-json/scripts/convert.py"), input, "-o", output,
+      "--format", "normalized",
+    ]);
+    const reduction = JSON.parse(await fs.readFile(output, "utf8"));
+    assert.equal(reduction.chords[0].quality, "7");
+    const harmony = reduction.tracks.find((track) => track.role === "harmony").notes;
+    const bass = reduction.tracks.find((track) => track.role === "bass").notes;
+    const pitches = [bass[0].midi, ...harmony.map((note) => note.midi)].sort((a, b) => a - b);
+    assert.equal(pitches.length, 4);
+    assert.equal(pitches.at(-1) - pitches[0] <= 12, true);
+    assert.equal(pitches.slice(1).every((pitch, index) => pitch - pitches[index] >= 2), true);
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

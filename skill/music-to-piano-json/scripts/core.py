@@ -287,28 +287,39 @@ def _align_notes_to_chords(notes,chords,low,high,melody=None):
     return sorted(aligned,key=lambda n:(n['time'],n['midi']))
 
 def _easy_left_hand(chords):
-    harmony=[];bass=[];previous_guide=None
+    from itertools import combinations
+    harmony=[];bass=[];previous_guides=[]
     for chord in chords:
         if float(chord.get('confidence',0))<MIN_PLAYABLE_CHORD_CONFIDENCE:continue
         pcs=set(chord['pitchClasses']); bass_pc=int(chord.get('bassPitchClass',chord['root']))
         shell_pcs=pcs-{bass_pc} if len(pcs)>1 else pcs
-        # Keep the entire hand inside one octave: one stable bass note and one
-        # characteristic chord tone.  This avoids the former three-note spans
-        # that could stretch close to two octaves or overlap a moving bass line.
+        # Use a compact triad by default.  A complete seventh chord is allowed
+        # only when it is reliable and every adjacent finger remains comfortable.
         bass_pitch=next(pitch for pitch in range(40,52) if pitch%12==bass_pc)
-        preferred_intervals=(3,4,10,11,9,0,5,2,6,8,7)
+        preferred_intervals=(3,4,10,11,0,7,6,8,9,5,2)
         priority={(int(chord['root'])+interval)%12:index for index,interval in enumerate(preferred_intervals)}
-        candidates=[pitch for pitch in range(bass_pitch+3,bass_pitch+13) if pitch%12 in shell_pcs]
-        if not candidates:
-            candidates=[pitch for pitch in range(bass_pitch+1,bass_pitch+13) if pitch%12 in shell_pcs]
+        candidates=[pitch for pitch in range(bass_pitch+1,bass_pitch+13) if pitch%12 in shell_pcs]
         if not candidates:continue
-        def guide_score(pitch):
-            movement=abs(pitch-previous_guide) if previous_guide is not None else abs(pitch-52)
-            return priority.get(pitch%12,99)*20+movement+abs((pitch-bass_pitch)-7)*.25
-        guide_pitch=min(candidates,key=guide_score);previous_guide=guide_pitch
+        rich_quality=chord.get('quality') in {'7','major7','minor7'}
+        allow_four=rich_quality and float(chord.get('confidence',0))>=.8 and len(shell_pcs)>=3
+        desired=min(3 if allow_four else 2,len(candidates));voicing=None
+        for count in range(desired,0,-1):
+            playable=[]
+            for tones in combinations(candidates,count):
+                pitches=(bass_pitch,)+tones
+                if any(b-a<2 for a,b in zip(pitches,pitches[1:])):continue
+                harmonic=sum(priority.get(pitch%12,99) for pitch in tones)*20
+                movement=sum(min((abs(pitch-old) for old in previous_guides),default=abs(pitch-52)) for pitch in tones)
+                spread=abs((tones[-1]-bass_pitch)-9)*.35
+                playable.append((harmonic+movement+spread,tones))
+            if playable:
+                voicing=list(min(playable,key=lambda item:item[0])[1]);break
+        if not voicing:continue
+        previous_guides=voicing
         common={'time':chord['time'],'duration':chord['duration'],'confidence':chord['confidence']}
         bass.append({'midi':bass_pitch,'name':note_name(bass_pitch),'velocity':.62,**common})
-        harmony.append({'midi':guide_pitch,'name':note_name(guide_pitch),'velocity':.56,**common})
+        for pitch in voicing:
+            harmony.append({'midi':pitch,'name':note_name(pitch),'velocity':.56,**common})
     return harmony,bass
 
 def _align_bass_to_chords(notes,chords):
@@ -409,13 +420,17 @@ def validate(d):
         paired=next((bass for bass in bass_track['notes'] if abs(bass['time']-note['time'])<1e-6 and abs(bass['duration']-note['duration'])<1e-6),None)
         if paired is None:errors.append('left-hand guide tone has no paired bass')
         elif note['midi']<=paired['midi'] or note['midi']-paired['midi']>12:errors.append('left-hand span is not playable')
+    for bass in bass_track['notes']:
+        guides=[note for note in harmony_track['notes'] if abs(bass['time']-note['time'])<1e-6 and abs(bass['duration']-note['duration'])<1e-6]
+        pitches=sorted([bass['midi']]+[note['midi'] for note in guides])
+        if any(b-a<2 for a,b in zip(pitches,pitches[1:])):errors.append('left-hand adjacent notes are not playable')
     events=[]
     for note in harmony_track['notes']+bass_track['notes']:
         events.extend(((note['time'],1),(note['time']+note['duration'],-1)))
     active=0
     for _,kind in sorted(events):
         active+=kind
-        if active>2:errors.append('left hand exceeds two simultaneous notes');break
+        if active>4:errors.append('left hand exceeds four simultaneous notes');break
     for s in d.get('sections',[]):
         if s['end']<=s['start']:errors.append(f'invalid section {s["id"]}')
     if errors:raise ValueError('; '.join(errors))
