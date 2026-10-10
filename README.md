@@ -32,6 +32,19 @@ npm start
 ```
 Apri `http://localhost:5173`.
 
+## Verificare la sincronizzazione con GitHub
+Da una working copy pulita sul branch `main`, aggiorna prima i riferimenti remoti e controlla lo stato:
+```bash
+git fetch --tags origin
+git status --short --branch
+```
+La riga di stato indica se il branch locale e `origin/main` sono avanti o indietro. Se il branch locale e indietro e non ci sono modifiche locali da conservare, riallinealo con:
+```bash
+git pull --ff-only origin main
+```
+`--ff-only` interrompe l'operazione se serve un merge. Se hai modifiche locali o il branch e avanti, controlla prima `git status` e i commit con `git log --oneline --decorate -10`.
+Il repository contiene il template `library/db.example.json` e i due file dimostrativi in `samples/json/`. I dati della libreria personale, incluse le riduzioni in `library/jsonpiano/`, restano locali e non vengono inviati a GitHub.
+
 ## Avvio senza VS Code (quick win)
 - Windows launcher: `scripts\start-pianovisual.bat`
 - Opzionale shortcut desktop:
@@ -40,6 +53,8 @@ Apri `http://localhost:5173`.
   3. usa l'icona `PianoVisual` sul desktop
 
 ## App desktop installabile (Electron)
+Versione rilasciata piu recente nel repository: **v1.0.29**. Vedi [note di rilascio v1.0.29](RELEASE_NOTES_v1.0.29.md) e [changelog completo](CHANGELOG.md). Le modifiche locali non ancora rilasciate sono indicate come `Unreleased` nel changelog.
+
 ### Avvio desktop locale
 ```bash
 npm install
@@ -57,7 +72,7 @@ Output in `dist/` (installer NSIS).
 - Workflow `Desktop Release` builda e pubblica asset Windows su push tag `v*`.
 - Nell'app installata: menu `Aggiornamenti -> Verifica aggiornamenti`.
 - Per update senza token utente, la repository/release deve essere pubblica.
-- Guida test end-to-end: [docs/UPDATE_TEST_v1.0.1_to_v1.0.2.md](docs/UPDATE_TEST_v1.0.1_to_v1.0.2.md)
+- Guida test end-to-end aggiornata: [docs/UPDATE_TEST.md](docs/UPDATE_TEST.md). La guida `v1.0.1 -> v1.0.2` resta nell'archivio storico.
 
 ## Flusso operativo completo (Quest 3)
 1. Importa uno o piu MIDI nella sezione `Importa MIDI`.
@@ -70,6 +85,7 @@ Output in `dist/` (installer NSIS).
 ### Sincronizzazione Quest 3 via ADB (desktop)
 - Installa Android SDK Platform Tools e assicurati che `adb` sia disponibile nel `PATH`.
 - Abilita la modalita sviluppatore/debug USB sul Quest e autorizza il computer nel visore.
+- Vedere `Quest 3` in Esplora file indica solo il collegamento MTP: per i pulsanti di sincronizzazione serve anche che `adb devices` mostri il dispositivo come `device` (non `unauthorized` o `offline`).
 - Usa `Rileva Quest 3`, quindi scegli `Importa JSON dal Quest` oppure `Invia JSON al Quest`.
 - Prima dell'invio PianoVisual confronta gli hash e mostra nuovi, modificati e gia uguali.
 - La sincronizzazione non elimina mai automaticamente file dal Quest.

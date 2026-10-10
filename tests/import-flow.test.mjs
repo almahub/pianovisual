@@ -171,6 +171,63 @@ test.beforeEach(async () => {
   await resetLibrary();
 });
 
+test('playlist rename rejects duplicate names and deletion keeps library songs', async () => {
+  const imported = await api('/api/library/import-batch', {
+    method: 'POST',
+    body: JSON.stringify({ items: [makeItem({ title: 'Playlist Song' })] }),
+  });
+  assert.equal(imported.importedCount, 1);
+  const songId = (await api('/api/library')).songs[0].id;
+  const first = (await api('/api/collections', { method: 'POST', body: JSON.stringify({ name: 'Studio A' }) })).collection;
+  const second = (await api('/api/collections', { method: 'POST', body: JSON.stringify({ name: 'Studio B' }) })).collection;
+  await api(`/api/songs/${songId}`, { method: 'PUT', body: JSON.stringify({ collectionIds: [first.id] }) });
+
+  const renamed = await api(`/api/collections/${first.id}`, { method: 'PUT', body: JSON.stringify({ name: 'Studio C' }) });
+  assert.equal(renamed.collection.name, 'Studio C');
+  await assert.rejects(
+    api(`/api/collections/${first.id}`, { method: 'PUT', body: JSON.stringify({ name: 'studio b' }) }),
+    /409/,
+  );
+
+  await api(`/api/collections/${first.id}`, { method: 'DELETE' });
+  const db = await api('/api/library');
+  assert.equal(db.collections.some((collection) => collection.id === first.id), false);
+  assert.equal(db.collections.some((collection) => collection.id === second.id), true);
+  assert.equal(db.songCollection.some((link) => link.collectionId === first.id), false);
+  assert.equal(db.songs.some((song) => song.id === songId), true);
+});
+
+test('active instruments persist per song without changing the music JSON', async () => {
+  const imported = await api('/api/library/import-batch', {
+    method: 'POST',
+    body: JSON.stringify({ items: [makeItem({ title: 'Instrument Selection' })] }),
+  });
+  assert.equal(imported.importedCount, 1);
+  const song = (await api('/api/library')).songs[0];
+  const jsonPath = path.join(root, song.jsonPath.replace(/^\//, ''));
+  const originalJson = await fs.readFile(jsonPath, 'utf8');
+
+  await api(`/api/songs/${song.id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ song: { activeInstruments: ['Piano'] } }),
+  });
+  let reloaded = (await api('/api/library')).songs.find((entry) => entry.id === song.id);
+  assert.deepEqual(reloaded.activeInstruments, ['Piano']);
+  assert.deepEqual(reloaded.instruments, song.instruments);
+  assert.equal(await fs.readFile(jsonPath, 'utf8'), originalJson);
+
+  await api(`/api/songs/${song.id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ song: { activeInstruments: [] } }),
+  });
+  reloaded = (await api('/api/library')).songs.find((entry) => entry.id === song.id);
+  assert.deepEqual(reloaded.activeInstruments, []);
+  await assert.rejects(
+    api(`/api/songs/${song.id}`, { method: 'PUT', body: JSON.stringify({ song: { activeInstruments: 'Piano' } }) }),
+    /400/,
+  );
+});
+
 test('remote catalog rejects unsafe or oversized deferred downloads', async () => {
   await assert.rejects(
     api('/api/remote-catalog/fetch', { method: 'POST', body: JSON.stringify({ paths: ['../secret.mid'] }) }),
@@ -283,6 +340,61 @@ test('import-json-archive skip duplicate keeps original', async () => {
   assert.equal(db.songs[0].title, 'Archive Song');
 });
 
+test('JSON import keeps different arrangements with the same title and artist', async () => {
+  const full = makeCompatiblePianoVisionJson();
+  full.name = 'Same Song';
+  full.artist = 'Same Artist';
+  const selected = structuredClone(full);
+  selected.supportingTracks = selected.supportingTracks.slice(0, 1);
+  const piano = structuredClone(full);
+  piano.supportingTracks[0].notes[0].midi = 69;
+
+  const items = [
+    { fileName: 'same-song.json', jsonData: full },
+    { fileName: 'same-song-filtered.json', jsonData: selected },
+    { fileName: 'same-song-piano.json', jsonData: piano },
+    { fileName: 'same-song-copy.json', jsonData: structuredClone(full) },
+  ];
+  const result = await api('/api/library/import-json-archive', {
+    method: 'POST',
+    body: JSON.stringify({ items }),
+  });
+  assert.equal(result.importedCount, 3);
+  assert.equal(result.skipped.length, 1);
+  assert.equal(result.report.length, items.length);
+
+  const db = await api('/api/library');
+  assert.equal(db.songs.length, 3);
+  assert.equal(db.songs.filter((song) => song.variantType === 'piano_reduction').length, 1);
+  assert.equal((await fs.readdir(jsonDir)).filter((name) => name.endsWith('.json')).length, 2);
+  assert.equal((await fs.readdir(pianoJsonDir)).filter((name) => name.endsWith('.json')).length, 1);
+
+  const again = await api('/api/library/import-json-archive', {
+    method: 'POST',
+    body: JSON.stringify({ items: items.slice(0, 3) }),
+  });
+  assert.equal(again.importedCount, 0);
+  assert.equal(again.skipped.length, 3);
+});
+
+test('JSON import does not deduplicate by title when artist is empty', async () => {
+  const first = makeCompatiblePianoVisionJson();
+  first.name = 'Same Title';
+  first.artist = '';
+  const second = structuredClone(first);
+  second.supportingTracks[0].notes[0].midi = 68;
+
+  const result = await api('/api/library/import-json-archive', {
+    method: 'POST',
+    body: JSON.stringify({ items: [
+      { fileName: 'same-title-full.json', jsonData: first },
+      { fileName: 'same-title-selected.json', jsonData: second },
+    ] }),
+  });
+  assert.equal(result.importedCount, 2);
+  assert.equal(result.skipped.length, 0);
+});
+
 test('JSON roundtrip does not duplicate a MIDI song when artist is empty', async () => {
   const midiItem = makeItem({ sourceFileName: 'roundtrip.mid', title: 'Roundtrip', artist: '', midiSeed: 'roundtrip' });
   let result = await api('/api/library/import-batch', { method: 'POST', body: JSON.stringify({ items: [midiItem] }) });
@@ -344,7 +456,8 @@ test('Piano Lab creates a separate compatible reduction linked to the full song'
   });
   assert.equal(result.song.variantType, 'piano_reduction');
   assert.equal(result.song.derivedFromSongId, imported.songs[0].id);
-  assert.equal(result.song.title, 'Skill Source piano');
+  assert.equal(result.song.title, 'Skill Source');
+  assert.equal(result.song.sourceFileName, 'Skill Source.json');
   assert.equal(result.song.reductionMode, 'piano_voice');
   assert.equal(result.song.instruments.includes('Voce / Melodia · mano destra'), true);
   assert.equal(result.song.instruments.includes('Accordi e basso · mano sinistra'), true);
@@ -426,7 +539,7 @@ test('existing piano reductions migrate from json and db.json to the dedicated l
 
   const merged = await api('/api/library');
   const migrated = merged.songs.find((song) => song.id === 'piano-legacy');
-  assert.equal(migrated.title, 'Legacy Song piano');
+  assert.equal(migrated.title, 'Legacy Song');
   assert.equal(migrated.reductionMode, 'legacy');
   assert.equal(migrated.jsonPath, `/library/jsonpiano/${legacyFileName}`);
   assert.equal(await fs.stat(path.join(pianoJsonDir, legacyFileName)).then(() => true), true);
@@ -481,7 +594,7 @@ test('import-json-archive overwrite duplicate updates metadata', async () => {
   await api('/api/library/import-json-archive', { method: 'POST', body: JSON.stringify({ items: [first] }) });
 
   const second = {
-    fileName: 'arch-b.json',
+    fileName: 'arch-a.json',
     jsonData: {
       supportingTracks: [{ notes: [{ midi: 62, time: 0, velocity: 0.7, duration: 0.5 }], myInstrument: -5, theirInstrument: 0 }],
       start_time: 0,

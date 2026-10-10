@@ -1,5 +1,7 @@
 # Test aggiornamento desktop (v1.0.1 -> v1.0.2)
 
+Documento storico per quel passaggio di versione. Per le release attuali usa [UPDATE_TEST.md](UPDATE_TEST.md); non ricreare i tag indicati qui.
+
 Questa guida serve per validare il flusso update della build Electron Windows.
 
 ## Prerequisiti

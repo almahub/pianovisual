@@ -2,6 +2,43 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+## [1.0.29] - 2026-10-10
+### Added
+- Esportazione multipla dei JSON filtrati secondo gli strumenti attivi salvati per ogni brano, senza cambiare il titolo dei file.
+- Gestione playlist dalla vista dedicata, con creazione, rinomina ed eliminazione confermata.
+- Scelta del colore e delle tracce attive del Visualizer salvata per brano.
+
+### Changed
+- Il Visualizer carica le tracce direttamente dai JSON e il pannello dettagli resta visibile durante lo scorrimento della libreria.
+- Le nuove riduzioni Piano Lab mantengono titolo e nome file del brano originale; i vecchi file non vengono rinominati.
+- L'import JSON conserva arrangiamenti diversi dello stesso brano e rende distinguibili i file sorgente con titoli uguali.
+- La rilevazione Quest distingue MTP e autorizzazione ADB.
+- `npm test` usa `node --test` per funzionare anche su Windows.
+- La libreria musicale e i database locali restano fuori dal repository e dall'installer.
+
+## [1.0.28] - 2026-09-03
+### Changed
+- La mano sinistra delle riduzioni usa accordi compatti con basso e piu note armoniche; sugli accordi di settima affidabili puo usare fino a quattro note.
+- La validazione controlla la distanza tra note adiacenti e l'estensione della mano sinistra.
+
+## [1.0.27] - 2026-09-02
+### Fixed
+- La mano sinistra delle riduzioni e stata semplificata con basso e nota guida entro un'ottava, evitando estensioni e sovrapposizioni difficili da suonare.
+
+## [1.0.26] - 2026-08-31
+### Changed
+- Le riduzioni adottano due mani: melodia a destra, armonia e basso a sinistra; rimossa la scelta tra modalita piano solo e piano con voce.
+
+## [1.0.25] - 2026-08-29
+### Added
+- Arrangiamento delle riduzioni guidato dagli accordi, con note di accompagnamento e basso associate all'armonia rilevata.
+
+## [1.0.24] - 2026-08-29
+### Added
+- Le tracce originali non usate nella riduzione sono disponibili separatamente come accompagnamento nel visualizer.
+- L'analisi della riduzione conserva gli indici delle tracce sorgente per distinguere mani e accompagnamento.
+
 ## [1.0.23] - 2026-08-29
 ### Added
 - Pulsante `Esporta su Piano` sotto l’export del Visualizer per creare una riduzione usando soltanto le tracce attive.

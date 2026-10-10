@@ -159,7 +159,10 @@ async function readDb() {
     }
     const currentTitle = String(song.title || "Senza titolo").trim();
     const renamedTitle = currentTitle.replace(/\s*[·-]?\s*Riduzione piano\s*$/i, "").trim();
-    const nextTitle = /\spiano$/i.test(renamedTitle) ? renamedTitle : `${renamedTitle || "Senza titolo"} piano`;
+    const source = db.songs.find((item) => item.id === song.derivedFromSongId);
+    const nextTitle = renamedTitle !== currentTitle ? renamedTitle || "Senza titolo"
+      : source && currentTitle === `${source.title || "Senza titolo"} piano` ? source.title || "Senza titolo"
+      : currentTitle;
     if (song.title !== nextTitle) {
       song.title = nextTitle;
       changed = true;
@@ -500,6 +503,9 @@ function songById(db, id) {
 }
 
 function applySongPatch(song, patch) {
+  if (Object.hasOwn(patch, "activeInstruments")) {
+    song.activeInstruments = [...new Set(patch.activeInstruments)];
+  }
   const allowed = [
     "title",
     "artist",
@@ -615,24 +621,22 @@ function hashJsonData(jsonData) {
   return hashBuffer(Buffer.from(JSON.stringify(jsonData), "utf8"));
 }
 
-async function findDuplicateJsonSong(db, { hash, title, artist, fileName }) {
+async function findDuplicateJsonSong(db, { hash, fileName }) {
   const expectedVariant = /-piano(?:-\d+)?\.json$/i.test(String(fileName || "")) ? "piano_reduction" : "full";
-  const nameMatch = findDuplicateSong(db, { hash: "", title, artist }).duplicate;
-  const direct =
-    db.songs.find((song) => song.jsonContentHash === hash) ||
-    db.songs.find((song) => song.fileHash === hash) ||
-    (nameMatch && (nameMatch.variantType === "piano_reduction" ? "piano_reduction" : "full") === expectedVariant ? nameMatch : null);
+  const sameVariant = (song) => (song.variantType === "piano_reduction" ? "piano_reduction" : "full") === expectedVariant;
+  const direct = db.songs.find((song) => sameVariant(song) && (song.jsonContentHash === hash || song.fileHash === hash));
   if (direct) return direct;
 
-  const incomingBase = normalizeText(path.basename(String(fileName || ""), path.extname(String(fileName || ""))));
+  const incomingName = String(fileName || "").toLowerCase();
   for (const song of db.songs) {
+    if (!sameVariant(song)) continue;
     const storedName = path.basename(String(song.jsonPath || ""));
     if (!storedName) continue;
-    const storedBase = normalizeText(path.basename(storedName, path.extname(storedName)));
-    const sourceBase = normalizeText(path.basename(String(song.sourceFileName || ""), path.extname(String(song.sourceFileName || ""))));
-    if (incomingBase && (incomingBase === storedBase || incomingBase === sourceBase)) return song;
+    const sourceName = path.basename(String(song.sourceFileName || ""));
+    if (incomingName && (incomingName === storedName.toLowerCase() || incomingName === sourceName.toLowerCase())) return song;
     try {
-      const storedJson = JSON.parse(await fs.readFile(path.join(JSON_DIR, storedName), "utf8"));
+      const directory = expectedVariant === "piano_reduction" ? PIANO_JSON_DIR : JSON_DIR;
+      const storedJson = JSON.parse(await fs.readFile(path.join(directory, storedName), "utf8"));
       const storedHash = hashJsonData(storedJson);
       song.jsonContentHash = storedHash;
       if (storedHash === hash) return song;
@@ -920,6 +924,7 @@ async function handleApi(req, res, url) {
       }
       const engineResult = await runPianoReduction(reductionSourcePath, outputPath, analysisOutputPath);
       const reducedJson = JSON.parse(await fs.readFile(outputPath, "utf8"));
+      reducedJson.name = existing?.title || sourceSong.title || "Senza titolo";
       let roleSourceIndices = {};
       let reductionAnalysis = {};
       try {
@@ -933,12 +938,12 @@ async function handleApi(req, res, url) {
       const validation = validatePianoVisionJsonData(reducedJson);
       if (!validation.ok) throw new Error(`JSON ridotto non valido: ${validation.errors.join(", ")}`);
 
-      const base = sanitizeName(path.basename(sourceName, path.extname(sourceName))) || sanitizeName(sourceSong.title) || sourceSong.id;
-      let targetName = existing ? path.basename(String(existing.jsonPath || "")) : `${base}-piano.json`;
+      const base = sanitizeName(sourceSong.title) || sourceSong.id;
+      let targetName = existing ? path.basename(String(existing.jsonPath || "")) : `${base}.json`;
       if (!existing) {
         let seq = 2;
         while (await pathExists(path.join(PIANO_JSON_DIR, targetName))) {
-          targetName = `${base}-piano-${seq}.json`;
+          targetName = `${base}-${seq}.json`;
           seq += 1;
         }
       }
@@ -962,7 +967,7 @@ async function handleApi(req, res, url) {
         });
       }
       Object.assign(reductionSong, {
-        title: `${sourceSong.title || "Senza titolo"} piano`,
+        title: existing?.title || sourceSong.title || "Senza titolo",
         artist: sourceSong.artist || "",
         composer: sourceSong.composer || "",
         genre: sourceSong.genre || "",
@@ -1255,13 +1260,11 @@ async function handleApi(req, res, url) {
 
     const { kept, dropped } = dedupeIncomingItems(items, dedupPolicy, (item) => {
       const fileName = sanitizeName(item?.fileName || "");
+      const variant = /-piano(?:-\d+)?\.json$/i.test(fileName) ? "piano_reduction" : "full";
       const keys = [];
-      if (fileName) keys.push(`file:${normalizeText(fileName)}`);
+      if (fileName) keys.push(`file:${variant}:${fileName.toLowerCase()}`);
       if (item?.jsonData && typeof item.jsonData === "object") {
-        const nm = normalizeText(item.jsonData?.name || "");
-        const ar = normalizeText(item.jsonData?.artist || "");
-        if (nm && ar) keys.push(`ta:${nm}||${ar}`);
-        if (nm) keys.push(`title:${nm}`);
+        keys.push(`hash:${variant}:${hashJsonData(item.jsonData)}`);
       }
       return keys;
     });
@@ -1295,7 +1298,7 @@ async function handleApi(req, res, url) {
       const hash = hashJsonData(jsonData);
       const meta = inferSongMetadataFromJson(jsonData, safeFile);
       const isPianoReduction = /-piano(?:-\d+)?\.json$/i.test(safeFile);
-      const duplicate = await findDuplicateJsonSong(db, { hash, title: meta.title, artist: meta.artist, fileName: safeFile });
+      const duplicate = await findDuplicateJsonSong(db, { hash, fileName: safeFile });
       const duplicateReason = duplicate ? "contenuto, nome file o metadati già presenti" : "";
 
       try {
@@ -1833,6 +1836,14 @@ async function handleApi(req, res, url) {
       return true;
     }
 
+    const activeInstruments = payload.song?.activeInstruments;
+    if (Object.hasOwn(payload.song || {}, "activeInstruments") &&
+        (!Array.isArray(activeInstruments) || activeInstruments.length > 128 ||
+          activeInstruments.some((name) => typeof name !== "string" || !name.trim() || name.length > 160))) {
+      sendJson(res, 400, { error: "Selezione strumenti non valida" });
+      return true;
+    }
+
     applySongPatch(song, payload.song || {});
 
     const practice = db.practiceMeta.find((pm) => pm.songId === songId);
@@ -1958,7 +1969,15 @@ async function handleApi(req, res, url) {
       sendJson(res, 400, { error: "Smart playlist non rinominabile" });
       return true;
     }
-    if (typeof payload.name === "string" && payload.name.trim()) c.name = payload.name.trim();
+    if (typeof payload.name === "string" && payload.name.trim()) {
+      const name = payload.name.trim();
+      const duplicate = db.collections.some((item) => item.id !== cid && item.type === c.type && !item.smartRule && item.name.toLowerCase() === name.toLowerCase());
+      if (duplicate) {
+        sendJson(res, 409, { error: "Esiste gia una playlist con questo nome" });
+        return true;
+      }
+      c.name = name;
+    }
     await writeDb(db);
     sendJson(res, 200, { collection: c });
     return true;

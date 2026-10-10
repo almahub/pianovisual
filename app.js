@@ -36,6 +36,9 @@ const el = {
   songsTableBody: document.getElementById("songsTableBody"),
   contentGrid: document.getElementById("contentGrid"),
   playlistsSection: document.getElementById("playlistsSection"),
+  playlistCreateBtn: document.getElementById("playlistCreateBtn"),
+  playlistCreateForm: document.getElementById("playlistCreateForm"),
+  playlistCreateName: document.getElementById("playlistCreateName"),
   playlistsSectionTitle: document.getElementById("playlistsSectionTitle"),
   playlistsCards: document.getElementById("playlistsCards"),
   smartCards: document.getElementById("smartCards"),
@@ -185,6 +188,7 @@ const el = {
   clearSelectionBtn: document.getElementById("clearSelectionBtn"),
   downloadSelectedBtn: document.getElementById("downloadSelectedBtn"),
   convertSelectedPianoBtn: document.getElementById("convertSelectedPianoBtn"),
+  exportSelectedFilteredBtn: document.getElementById("exportSelectedFilteredBtn"),
   deleteSelectedBtn: document.getElementById("deleteSelectedBtn"),
   selectAllPageCheckbox: document.getElementById("selectAllPageCheckbox"),
 
@@ -236,6 +240,7 @@ const state = {
     miniBars: [5, 10, 8, 14, 6, 11, 7],
     availableInstruments: [],
     activeInstrumentsBySong: {},
+    colorsBySong: {},
     minMidi: 21,
     maxMidi: 108,
     renderCache: {
@@ -794,15 +799,57 @@ function isBlackKeyMidi(midi) {
   return p === 1 || p === 3 || p === 6 || p === 8 || p === 10;
 }
 
-function colorFromInstrument(name, past = false) {
+function defaultInstrumentHsl(name, past = false) {
   const s = String(name || "instrument");
   let hash = 0;
   for (let i = 0; i < s.length; i += 1) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
   const hue = hash % 360;
   if (s.startsWith("Voce / Melodia")) {
-    return past ? "hsl(39 38% 31%)" : "hsl(42 88% 66%)";
+    return past ? [39, 38, 31] : [42, 88, 66];
   }
-  return past ? `hsl(${hue} 30% 30%)` : `hsl(${hue} 78% 62%)`;
+  return past ? [hue, 30, 30] : [hue, 78, 62];
+}
+
+function hslToHex(hue, saturation, lightness) {
+  const s = saturation / 100;
+  const l = lightness / 100;
+  const a = s * Math.min(l, 1 - l);
+  const channel = (n) => {
+    const k = (n + hue / 30) % 12;
+    return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)))).toString(16).padStart(2, "0");
+  };
+  return `#${channel(0)}${channel(8)}${channel(4)}`;
+}
+
+function colorFromInstrument(name, past = false, songId = state.selectedSongId) {
+  const custom = state.player.colorsBySong[songId]?.[name];
+  if (custom) {
+    if (!past) return custom;
+    const shade = (offset) => Math.round(parseInt(custom.slice(offset, offset + 2), 16) * 0.52).toString(16).padStart(2, "0");
+    return `#${shade(1)}${shade(3)}${shade(5)}`;
+  }
+  const [hue, saturation, lightness] = defaultInstrumentHsl(name, past);
+  return `hsl(${hue} ${saturation}% ${lightness}%)`;
+}
+
+function loadInstrumentColors() {
+  try {
+    const stored = JSON.parse(localStorage.getItem("pv_visualizer_colors_v1") || "{}");
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return;
+    for (const [songId, colors] of Object.entries(stored)) {
+      if (!colors || typeof colors !== "object" || Array.isArray(colors)) continue;
+      const valid = Object.fromEntries(Object.entries(colors).filter(([, color]) => typeof color === "string" && /^#[0-9a-f]{6}$/i.test(color)));
+      if (Object.keys(valid).length) state.player.colorsBySong[songId] = valid;
+    }
+  } catch {}
+}
+
+function saveInstrumentColors() {
+  try {
+    localStorage.setItem("pv_visualizer_colors_v1", JSON.stringify(state.player.colorsBySong));
+  } catch {
+    toast("Colore applicato, ma non salvato per la prossima sessione.", "error");
+  }
 }
 
 function midiToName(midi) {
@@ -1335,6 +1382,11 @@ function currentPageRows() {
 function renderTable() {
   const list = filteredSongs();
   const { rows, totalPages } = pagedSongs(list);
+  const titleCounts = new Map();
+  for (const song of list) {
+    const key = `${normalizeText(song.title)}\0${normalizeText(song.artist)}`;
+    titleCounts.set(key, (titleCounts.get(key) || 0) + 1);
+  }
 
   el.pageInfo.textContent = `Pagina ${state.page}/${totalPages}`;
   el.prevPageBtn.disabled = state.page <= 1;
@@ -1356,6 +1408,8 @@ function renderTable() {
           ? `<button class="icon-btn" data-row-action="remove-playlist" data-song-id="${song.id}" title="Rimuovi dalla playlist aperta">−</button>`
           : `<button class="icon-btn" data-row-action="playlist" data-song-id="${song.id}" title="Aggiungi playlist">＋</button>`;
       const pianoVariant = song.variantType === "piano_reduction";
+      const titleKey = `${normalizeText(song.title)}\0${normalizeText(song.artist)}`;
+      const sourceLabel = titleCounts.get(titleKey) > 1 ? song.sourceFileName || song.jsonPath || "" : "";
       return `
         <tr data-song-id="${song.id}" class="${active}${pianoVariant ? " piano-row" : ""}">
           <td><input type="checkbox" data-row-action="select" data-song-id="${song.id}" ${checked} /></td>
@@ -1365,6 +1419,7 @@ function renderTable() {
               <div>
                 <strong>${escapeHtml(song.title || "Senza titolo")}</strong><br />
                 <small>${pianoVariant ? '<span class="piano-table-badge">Piano</span>' : isFavorite(song.id) ? "★ Preferito" : ""}</small>
+                ${sourceLabel ? `<small class="song-source-name" title="${escapeHtml(sourceLabel)}">${escapeHtml(sourceLabel)}</small>` : ""}
               </div>
             </div>
           </td>
@@ -1474,10 +1529,19 @@ function renderDirectoryPanel() {
             .map((playlist) => {
               const count = (state.db.songCollection || []).filter((sc) => sc.collectionId === playlist.id).length;
               const active = state.selectedPlaylistId === playlist.id;
-              return `<article class="smart-card">
+              return `<article class="smart-card playlist-card">
                 <strong>${escapeHtml(playlist.name)}</strong>
-                <p>${count} brani ·</p>
-                <button class="chip ${active ? "active" : ""}" data-open-playlist-id="${playlist.id}">${active ? "Aperta" : "Apri"}</button>
+                <p>${count} ${count === 1 ? "brano" : "brani"}</p>
+                <div class="playlist-card-actions">
+                  <button class="chip ${active ? "active" : ""}" data-open-playlist-id="${escapeHtml(playlist.id)}">${active ? "Aperta" : "Apri"}</button>
+                  <button class="playlist-icon-btn" type="button" data-rename-playlist-id="${escapeHtml(playlist.id)}" title="Rinomina playlist" aria-label="Rinomina ${escapeHtml(playlist.name)}">&#9998;</button>
+                  <button class="playlist-icon-btn" type="button" data-delete-playlist-id="${escapeHtml(playlist.id)}" title="Elimina playlist" aria-label="Elimina ${escapeHtml(playlist.name)}">&times;</button>
+                </div>
+                <form class="playlist-edit-form hidden" data-rename-playlist-form="${escapeHtml(playlist.id)}">
+                  <label>Nuovo nome<input type="text" name="name" value="${escapeHtml(playlist.name)}" maxlength="120" required /></label>
+                  <button class="btn" type="submit">Salva</button>
+                  <button class="btn subtle" type="button" data-cancel-playlist-rename>Annulla</button>
+                </form>
               </article>`;
             })
             .join("");
@@ -1612,10 +1676,13 @@ function renderViewLabels() {
   el.remoteCatalogPanel.classList.toggle("hidden", state.view !== "remote");
   el.pianoLabPanel?.classList.toggle("hidden", state.view !== "reductions");
   el.playlistsSection.classList.toggle("hidden", !["home", "library", "playlists", "genres", "artists"].includes(state.view));
+  el.playlistCreateBtn.classList.toggle("hidden", state.view !== "playlists");
+  el.playlistCreateForm.classList.add("hidden");
   el.smartPlaylistsSection.classList.toggle("hidden", state.view !== "home");
   const libraryOnly = state.view === "library" || state.view === "reductions";
   el.libraryToolbar?.classList.toggle("hidden", !libraryOnly);
   el.convertSelectedPianoBtn?.classList.toggle("hidden", state.view !== "library");
+  el.exportSelectedFilteredBtn?.classList.toggle("hidden", state.view !== "library");
   el.searchWrap.classList.toggle("hidden", !libraryOnly);
   el.filterPanel.classList.toggle("hidden", !libraryOnly);
   el.detailPanel.classList.toggle("hidden", !libraryOnly);
@@ -1625,6 +1692,13 @@ function renderViewLabels() {
   const showTable = shouldShowTable();
   el.tableWrap.classList.toggle("hidden", !showTable);
   el.paginationWrap.classList.toggle("hidden", !showTable);
+}
+
+function activeInstrumentsForSong(song, available) {
+  const selected = state.player.activeInstrumentsBySong[song.id] ?? song.activeInstruments;
+  return Array.isArray(selected)
+    ? selected.filter((name) => available.includes(name))
+    : available.slice();
 }
 
 function renderDetail() {
@@ -1653,7 +1727,7 @@ function renderDetail() {
   const playlists = collections.filter((c) => c.type === "playlist" && !c.smartRule).map((c) => c.name);
   const loadedInstruments = state.player.loadedSongId === song.id ? state.player.availableInstruments : [];
   const instruments = loadedInstruments.length ? loadedInstruments : instrumentsForSong(song);
-  const activeSet = new Set(state.player.activeInstrumentsBySong[song.id] || instruments);
+  const activeSet = new Set(activeInstrumentsForSong(song, instruments));
   const activeCount = instruments.filter((name) => activeSet.has(name)).length;
 
   el.emptyDetail.classList.add("hidden");
@@ -1944,6 +2018,26 @@ function onDirectoryPanelClick(event) {
     return;
   }
 
+  const renameBtn = event.target.closest("[data-rename-playlist-id]");
+  if (renameBtn) {
+    const form = renameBtn.closest(".playlist-card")?.querySelector("[data-rename-playlist-form]");
+    form?.classList.toggle("hidden");
+    if (form && !form.classList.contains("hidden")) form.elements.namedItem("name")?.focus();
+    return;
+  }
+
+  const cancelRenameBtn = event.target.closest("[data-cancel-playlist-rename]");
+  if (cancelRenameBtn) {
+    cancelRenameBtn.closest("[data-rename-playlist-form]")?.classList.add("hidden");
+    return;
+  }
+
+  const deleteBtn = event.target.closest("[data-delete-playlist-id]");
+  if (deleteBtn) {
+    void deletePlaylistById(deleteBtn.dataset.deletePlaylistId);
+    return;
+  }
+
   const playlistBtn = event.target.closest("[data-open-playlist-id]");
   if (playlistBtn) {
     state.selectedPlaylistId = playlistBtn.dataset.openPlaylistId;
@@ -2016,58 +2110,6 @@ function dedupeBatchItems(items, mode = "keep_first") {
       for (const k of keys) keyToIndex.set(k, conflictIdx);
     } else {
       dropped.push({ item, reason: "duplicato batch (tenuto primo)" });
-    }
-  }
-
-  return { kept, dropped };
-}
-
-function dedupeJsonArchiveItems(items, mode = "keep_first") {
-  const kept = [];
-  const dropped = [];
-  const keyToIndex = new Map();
-
-  const buildKeys = (entry) => {
-    const keys = [];
-    const fileName = normalizeText(entry?.fileName || "");
-    if (fileName) keys.push(`file:${fileName}`);
-    const data = entry?.jsonData;
-    if (data && typeof data === "object") {
-      const songName = normalizeText(data?.name || "");
-      const artist = normalizeText(data?.artist || "");
-      if (songName && artist) keys.push(`ta:${songName}||${artist}`);
-      if (songName) keys.push(`title:${songName}`);
-    }
-    return keys;
-  };
-
-  for (const item of items) {
-    const keys = buildKeys(item);
-    let conflictIdx = -1;
-    for (const key of keys) {
-      if (keyToIndex.has(key)) {
-        conflictIdx = keyToIndex.get(key);
-        break;
-      }
-    }
-
-    if (conflictIdx === -1) {
-      kept.push(item);
-      const idx = kept.length - 1;
-      for (const key of keys) keyToIndex.set(key, idx);
-      continue;
-    }
-
-    if (mode === "keep_last") {
-      const prev = kept[conflictIdx];
-      if (prev) dropped.push({ item: prev, reason: "duplicato interno archivio (tenuto ultimo)" });
-      kept[conflictIdx] = item;
-      for (const [k, v] of keyToIndex.entries()) {
-        if (v === conflictIdx) keyToIndex.delete(k);
-      }
-      for (const key of keys) keyToIndex.set(key, conflictIdx);
-    } else {
-      dropped.push({ item, reason: "duplicato interno archivio (tenuto primo)" });
     }
   }
 
@@ -2698,8 +2740,16 @@ function downloadPreviewJson() {
 }
 
 function trackInstrumentNameFromJson(jsonData, song, idx) {
-  const fromOriginal = repairMojibake(String(jsonData?.original?.tracks?.[idx]?.instrument?.name || "").trim());
+  const originalTracks = Array.isArray(jsonData?.original?.tracks) ? jsonData.original.tracks : [];
+  const topLevelTracks = Array.isArray(jsonData?.tracks) ? jsonData.tracks : [];
+  const source = originalTracks.some((track) => track?.notes?.length) ? originalTracks
+    : topLevelTracks.some((track) => track?.notes?.length) ? topLevelTracks : [];
+  const fromSource = repairMojibake(String(source[idx]?.instrument?.name || "").trim());
+  if (fromSource) return fromSource;
+  const fromOriginal = repairMojibake(String(originalTracks[idx]?.instrument?.name || "").trim());
   if (fromOriginal) return fromOriginal;
+  const fromTracks = repairMojibake(String(topLevelTracks[idx]?.instrument?.name || "").trim());
+  if (fromTracks) return fromTracks;
   const fromSong = instrumentsForSong(song)[idx];
   if (fromSong) return fromSong;
   return `Track ${idx + 1}`;
@@ -2709,8 +2759,28 @@ function filterJsonByActiveInstruments(jsonData, song, activeInstruments, includ
   const activeSet = new Set((activeInstruments || []).map((x) => String(x || "").trim()).filter(Boolean));
   const clone = JSON.parse(JSON.stringify(jsonData || {}));
   const originalTracks = Array.isArray(clone?.original?.tracks) ? clone.original.tracks : [];
+  const topLevelTracks = Array.isArray(clone?.tracks) ? clone.tracks : [];
   const supportingTracks = Array.isArray(clone?.supportingTracks) ? clone.supportingTracks : [];
-  const trackCount = Math.max(originalTracks.length, supportingTracks.length);
+  const trackCount = Math.max(originalTracks.length, topLevelTracks.length, supportingTracks.length);
+  const hasTrackNotes = [originalTracks, topLevelTracks, supportingTracks]
+    .some((tracks) => tracks.some((track) => (track?.notes || []).length > 0));
+  if (!hasTrackNotes && clone.tracksV2 && typeof clone.tracksV2 === "object") {
+    const hands = extractPlayableTracks(jsonData, instrumentsForSong(song), song);
+    const kept = hands.filter((hand) => activeSet.has(hand.instrument));
+    if (kept.length === 0) throw new Error("Nessuno strumento attivo: impossibile esportare.");
+    for (const [index, key] of ["right", "left"].entries()) {
+      if (activeSet.has(hands[index]?.instrument)) continue;
+      clone.tracksV2[key] = (clone.tracksV2[key] || []).map((measure) => ({ ...measure, notes: [] }));
+    }
+    clone.song_length = kept.reduce((end, hand) => hand.notes.reduce(
+      (handEnd, note) => Math.max(handEnd, note.time + note.duration), end,
+    ), 0);
+    if (includeAuditFields) {
+      clone.filteredByInstruments = [...activeSet];
+      clone.filteredAt = new Date().toISOString();
+    }
+    return clone;
+  }
   const keepIdx = [];
 
   for (let idx = 0; idx < trackCount; idx += 1) {
@@ -2727,7 +2797,7 @@ function filterJsonByActiveInstruments(jsonData, song, activeInstruments, includ
       const playableOriginalTracks = originalTracks.filter((track) => (track?.notes || []).length > 0);
       clone.supportingTracks = supportingTracks.filter((_, idx) => {
         const instrument = repairMojibake(
-          String(playableOriginalTracks[idx]?.instrument?.name || instrumentsForSong(song)[idx] || `Track ${idx + 1}`).trim(),
+          String(playableOriginalTracks[idx]?.instrument?.name || trackInstrumentNameFromJson(jsonData, song, idx)).trim(),
         );
         return activeSet.has(instrument);
       });
@@ -2737,6 +2807,9 @@ function filterJsonByActiveInstruments(jsonData, song, activeInstruments, includ
   }
   if (originalTracks.length) {
     clone.original.tracks = keepIdx.map((idx) => originalTracks[idx]).filter(Boolean);
+  }
+  if (topLevelTracks.length) {
+    clone.tracks = keepIdx.map((idx) => topLevelTracks[idx]).filter(Boolean);
   }
   if (Array.isArray(clone.accompanyingInstruments)) {
     clone.accompanyingInstruments = keepIdx.map((idx) => clone.accompanyingInstruments[idx]).filter((v) => v !== undefined);
@@ -2748,21 +2821,24 @@ function filterJsonByActiveInstruments(jsonData, song, activeInstruments, includ
     clone.instruments = keepIdx.map((idx) => clone.instruments[idx]).filter((v) => v !== undefined);
   }
 
-  if (originalTracks.length && Array.isArray(clone.measures)) {
-    clone.tracksV2 = buildTracksV2(clone.original.tracks, clone.measures, Number(clone.resolution || 480));
+  if ((clone?.original?.tracks?.some((track) => track?.notes?.length) ||
+       clone?.tracks?.some((track) => track?.notes?.length)) && Array.isArray(clone.measures)) {
+    clone.tracksV2 = buildTracksV2(
+      originalTracks.length ? clone.original.tracks : clone.tracks,
+      clone.measures,
+      Number(clone.resolution || 480),
+    );
   } else if (clone.tracksV2 && typeof clone.tracksV2 === "object") {
     clone.tracksV2 = { right: [], left: [] };
   }
 
-  const keptTracks = clone?.original?.tracks?.length ? clone.original.tracks : clone.supportingTracks || [];
-  const filteredDuration = keptTracks.reduce(
-    (maxEnd, track) =>
-      Math.max(
-        maxEnd,
-        ...(track?.notes || []).map((note) => Number(note.time || 0) + Number(note.duration || 0)),
-      ),
-    0,
-  );
+  const keptTracks = clone?.original?.tracks?.some((track) => track?.notes?.length)
+    ? clone.original.tracks
+    : clone?.tracks?.some((track) => track?.notes?.length) ? clone.tracks : clone.supportingTracks || [];
+  const filteredDuration = keptTracks.reduce((maxEnd, track) => (track?.notes || []).reduce(
+    (trackEnd, note) => Math.max(trackEnd, Number(note.time || 0) + Number(note.duration || 0)),
+    maxEnd,
+  ), 0);
   clone.song_length = Math.max(0, filteredDuration);
   if (includeAuditFields) {
     clone.filteredByInstruments = [...activeSet];
@@ -2779,21 +2855,17 @@ async function exportFilteredSongJson() {
     return;
   }
 
-  const fallback = instrumentsForSong(song);
-  const active = (state.player.activeInstrumentsBySong[song.id] || fallback).filter(Boolean);
-  if (active.length === 0) {
-    toast("Nessuno strumento attivo da esportare", "error");
-    return;
-  }
-
   showLoading(true);
   try {
     const res = await fetch(song.jsonPath);
     if (!res.ok) throw new Error("Impossibile leggere il JSON del brano");
     const jsonData = await res.json();
+    const all = instrumentNamesFromJson(jsonData, song);
+    const active = activeInstrumentsForSong(song, all);
+    if (active.length === 0) throw new Error("Nessuno strumento attivo da esportare");
     const filtered = filterJsonByActiveInstruments(jsonData, song, active);
-    const base = sanitizeFileName((song.title || song.id || "song").toLowerCase().replace(/\s+/g, "-"));
-    const fileName = `${base}-filtered.json`;
+    filtered.name = song.title || filtered.name;
+    const fileName = `${sanitizeFileName(song.title || song.id || "song")}.json`;
     const blob = new Blob([JSON.stringify(filtered, null, 2)], { type: "application/json" });
     downloadBlob(blob, fileName);
     toast(`JSON filtrato esportato (${active.length} strumenti attivi)`, "ok");
@@ -2964,8 +3036,9 @@ async function addSongToPlaylistById(songId) {
   openPlaylistQuickMenuForSong(song.id);
 }
 
-async function createPlaylist() {
-  const name = ((el.toolPlaylistName?.value || "").trim() || (el.metaPlaylist?.value || "").trim()).trim();
+async function createPlaylist(nameOverride = "") {
+  const name = (typeof nameOverride === "string" && nameOverride.trim()) ||
+    (el.toolPlaylistName?.value || "").trim() || (el.metaPlaylist?.value || "").trim();
   if (!name) {
     await managePlaylist();
     toast("Inserisci un nome playlist nel pannello gestione", "error");
@@ -3110,17 +3183,23 @@ async function renamePlaylist() {
     return;
   }
 
-  const name = (el.toolPlaylistName?.value || "").trim();
-  if (!name || !name.trim()) return;
+  await renamePlaylistById(current.id, el.toolPlaylistName?.value || "");
+}
+
+async function renamePlaylistById(playlistId, requestedName) {
+  const current = listManualPlaylists().find((x) => x.id === playlistId);
+  const name = requestedName.trim();
+  if (!current || !name || name === current.name) return;
 
   showLoading(true);
   try {
     await api(`/api/collections/${current.id}`, {
       method: "PUT",
-      body: JSON.stringify({ name: name.trim() }),
+      body: JSON.stringify({ name }),
     });
     await refreshDb();
     refreshLibraryToolsPanel();
+    if (el.toolPlaylistSelect.value === current.id) el.toolPlaylistName.value = name;
     render();
     toast("Playlist rinominata", "ok");
   } catch (error) {
@@ -3137,9 +3216,17 @@ async function deletePlaylist() {
     return;
   }
 
+  await deletePlaylistById(current.id);
+}
+
+async function deletePlaylistById(playlistId) {
+  const current = listManualPlaylists().find((x) => x.id === playlistId);
+  if (!current) return;
+  if (!confirm(`Eliminare la playlist "${current.name}"? I brani resteranno nella libreria.`)) return;
   showLoading(true);
   try {
     await api(`/api/collections/${current.id}`, { method: "DELETE" });
+    if (state.selectedPlaylistId === current.id) state.selectedPlaylistId = "";
     await refreshDb();
     refreshLibraryToolsPanel();
     render();
@@ -3198,8 +3285,7 @@ function extractPianoReductionTracks(jsonData, song = null) {
         })),
       );
       return { instrument, notes };
-    })
-    .filter((track) => track.notes.length > 0);
+    });
 
   return pianoHands;
 }
@@ -3207,8 +3293,28 @@ function extractPianoReductionTracks(jsonData, song = null) {
 function extractPlayableTracks(jsonData, fallbackInstruments = [], song = null) {
   if (song?.variantType === "piano_reduction") return extractPianoReductionTracks(jsonData, song);
   const originalTracks = Array.isArray(jsonData?.original?.tracks) ? jsonData.original.tracks : [];
-  if (originalTracks.length > 0) {
-    return originalTracks
+  const topLevelTracks = Array.isArray(jsonData?.tracks) ? jsonData.tracks : [];
+  const supportingTracks = Array.isArray(jsonData?.supportingTracks) ? jsonData.supportingTracks : [];
+  const hasNotes = (tracks) => tracks.some((track) => (track?.notes || []).length > 0);
+  if (!hasNotes(originalTracks) && !hasNotes(topLevelTracks) && !hasNotes(supportingTracks) && jsonData?.tracksV2) {
+    return ["right", "left"].map((key, idx) => {
+      const instrument = fallbackInstruments[idx] || (key === "right" ? "Mano destra" : "Mano sinistra");
+      const notes = (jsonData.tracksV2[key] || []).flatMap((measure) => (measure?.notes || []).map((note) => ({
+        midi: Number(note.note ?? note.midi ?? 60),
+        time: Number(note.start ?? note.time ?? 0),
+        duration: Math.max(0.05, Number(note.duration || 0.2)),
+        velocity: clamp01(Number(note.velocity ?? 0.7)),
+        instrument,
+      })));
+      return { instrument, notes };
+    });
+  }
+  const namedTracks = hasNotes(originalTracks) ? originalTracks
+    : hasNotes(topLevelTracks) ? topLevelTracks
+    : hasNotes(supportingTracks) ? []
+    : originalTracks.length ? originalTracks : topLevelTracks;
+  if (namedTracks.length > 0) {
+    return namedTracks
       .map((track, idx) => {
         const instrument = repairMojibake(
           String(track?.instrument?.name || fallbackInstruments[idx] || `Track ${idx + 1}`).trim(),
@@ -3221,14 +3327,15 @@ function extractPlayableTracks(jsonData, fallbackInstruments = [], song = null) 
           instrument,
         }));
         return { instrument, notes };
-      })
-      .filter((t) => t.notes.length > 0);
+      });
   }
 
-  const supportingTracks = Array.isArray(jsonData?.supportingTracks) ? jsonData.supportingTracks : [];
   return supportingTracks
     .map((track, idx) => {
-      const instrument = repairMojibake(String(fallbackInstruments[idx] || `Track ${idx + 1}`).trim());
+      const instrument = repairMojibake(String(
+        originalTracks[idx]?.instrument?.name || topLevelTracks[idx]?.instrument?.name ||
+        fallbackInstruments[idx] || `Track ${idx + 1}`,
+      ).trim());
       const notes = (track?.notes || []).map((n) => ({
         midi: Number(n.midi || 60),
         time: Number(n.time || 0),
@@ -3237,8 +3344,11 @@ function extractPlayableTracks(jsonData, fallbackInstruments = [], song = null) 
         instrument,
       }));
       return { instrument, notes };
-    })
-    .filter((t) => t.notes.length > 0);
+    });
+}
+
+function instrumentNamesFromJson(jsonData, song) {
+  return [...new Set(extractPlayableTracks(jsonData, instrumentsForSong(song), song).map((track) => track.instrument).filter(Boolean))];
 }
 
 function buildPlayableNotesFromTracks(trackGroups, activeInstruments) {
@@ -3263,18 +3373,26 @@ function renderVisualizerLegend(songId) {
   const loadedInstruments = state.player.loadedSongId === song.id ? state.player.availableInstruments : [];
   const instruments = loadedInstruments.length ? loadedInstruments : instrumentsForSong(song);
   if (instruments.length === 0) {
-    el.visualizerLegend.innerHTML = '<span class="mini-note">Nessuna traccia strumento disponibile</span>';
+    el.visualizerLegend.innerHTML = state.player.loadedSongId === song.id
+      ? '<span class="mini-note">Nessuna traccia strumento disponibile</span>'
+      : '<span class="mini-note">Caricamento strumenti...</span>';
     return;
   }
-  const active = new Set(state.player.activeInstrumentsBySong[song.id] || instruments);
+  const active = new Set(activeInstrumentsForSong(song, instruments));
   el.visualizerLegend.innerHTML = instruments
     .map((name) => {
       const on = active.has(name);
-      const swatch = colorFromInstrument(name, false);
-      return `<button class="viz-legend-item${on ? " active" : " inactive"}" data-instrument-toggle="${escapeHtml(name)}" type="button" aria-pressed="${on}" title="${on ? "Disattiva" : "Attiva"} ${escapeHtml(name)}">
-        <i style="background:${escapeHtml(swatch)}"></i>
-        <span>${escapeHtml(name)}</span>
-      </button>`;
+      const custom = state.player.colorsBySong[song.id]?.[name];
+      const swatch = colorFromInstrument(name, false, song.id);
+      const pickerColor = custom || hslToHex(...defaultInstrumentHsl(name));
+      return `<div class="viz-legend-control">
+        <button class="viz-legend-item${on ? " active" : " inactive"}" data-instrument-toggle="${escapeHtml(name)}" type="button" aria-pressed="${on}" title="${on ? "Disattiva" : "Attiva"} ${escapeHtml(name)}">
+          <i style="background:${escapeHtml(swatch)}"></i>
+          <span>${escapeHtml(name)}</span>
+        </button>
+        <input class="viz-color-input" type="color" data-instrument-color="${escapeHtml(name)}" value="${pickerColor}" aria-label="Colore di ${escapeHtml(name)}" title="Cambia colore di ${escapeHtml(name)}" />
+        ${custom ? `<button class="viz-color-reset" type="button" data-instrument-color-reset="${escapeHtml(name)}" aria-label="Ripristina colore automatico di ${escapeHtml(name)}" title="Ripristina colore automatico">↺</button>` : ""}
+      </div>`;
     })
     .join("");
 }
@@ -3303,16 +3421,14 @@ async function loadSelectedSongForPlayer(forceReload = false) {
     const res = await fetch(song.jsonPath);
     if (!res.ok) throw new Error("Impossibile caricare JSON del brano");
     jsonData = await res.json();
+    if (state.selectedSongId !== song.id) return false;
     state.player.lastJsonData = jsonData;
   }
 
   const fallbackInstruments = instrumentsForSong(song);
   const trackGroups = extractPlayableTracks(jsonData, fallbackInstruments, song);
   const availableInstruments = [...new Set(trackGroups.map((g) => g.instrument).filter(Boolean))];
-  const stored = state.player.activeInstrumentsBySong[song.id];
-  const activeInstruments = Array.isArray(stored)
-    ? stored.filter((name) => availableInstruments.includes(name))
-    : availableInstruments.slice();
+  const activeInstruments = activeInstrumentsForSong(song, availableInstruments);
   const { notes, duration } = buildPlayableNotesFromTracks(trackGroups, activeInstruments);
 
   state.player.notes = notes;
@@ -3361,7 +3477,7 @@ function drawVisualizerFrame() {
   const activeColorByMidi = new Map();
   for (const n of visibleNotes) {
     if (n.time <= current && n.time + n.duration >= current && !activeColorByMidi.has(n.midi)) {
-      activeColorByMidi.set(n.midi, colorFromInstrument(n.instrument, false));
+      activeColorByMidi.set(n.midi, colorFromInstrument(n.instrument, false, state.player.loadedSongId));
     }
   }
 
@@ -3380,7 +3496,7 @@ function drawVisualizerFrame() {
     if (y > canvas.height || y + h < 0) continue;
 
     const past = n.time + n.duration < current;
-    ctx.fillStyle = colorFromInstrument(n.instrument, past);
+    ctx.fillStyle = colorFromInstrument(n.instrument, past, state.player.loadedSongId);
     ctx.fillRect(x, y, w, h);
   }
 
@@ -3564,7 +3680,7 @@ function scrollMainBy(delta) {
   el.mainContentScroll.scrollBy({ top: delta, behavior: "smooth" });
 }
 
-function onTableClick(event) {
+async function onTableClick(event) {
   const actionBtn = event.target.closest("[data-row-action]");
   if (actionBtn) {
     const songId = actionBtn.dataset.songId;
@@ -3576,6 +3692,7 @@ function onTableClick(event) {
       if (el.selectAllPageCheckbox) {
         el.selectAllPageCheckbox.checked = rows.length > 0 && rows.every((s) => state.selectedSongIds.has(s.id));
       }
+      updateSelectionInfo();
       return;
     }
     if (action === "favorite") {
@@ -3609,8 +3726,25 @@ function onTableClick(event) {
   if (!tr) return;
   state.selectedSongId = tr.dataset.songId;
   state.player.loadedSongId = "";
+  state.player.notes = [];
+  state.player.availableInstruments = [];
+  state.player.duration = 0;
+  el.detailPanel.scrollTop = 0;
   pausePlayer();
   render();
+  drawVisualizerFrame();
+  if (window.matchMedia("(max-width: 1180px)").matches) {
+    el.detailPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  const selectedSongId = state.selectedSongId;
+  try {
+    await loadSelectedSongForPlayer();
+    if (state.selectedSongId !== selectedSongId) return;
+    renderDetail();
+    drawVisualizerFrame();
+  } catch (error) {
+    if (state.selectedSongId === selectedSongId) toast(`Tracce non caricate: ${error.message}`, "error");
+  }
 }
 
 function downloadBlob(blob, fileName) {
@@ -3659,6 +3793,11 @@ function updateSelectionInfo() {
     el.convertSelectedPianoBtn.textContent = pianoEligibleCount > 0
       ? `Converti in piano (${pianoEligibleCount})`
       : "Converti selezionati in piano";
+  }
+  if (el.exportSelectedFilteredBtn) {
+    el.exportSelectedFilteredBtn.disabled = pianoEligibleCount === 0;
+    el.exportSelectedFilteredBtn.textContent = pianoEligibleCount > 0
+      ? `Esporta JSON filtrati (${pianoEligibleCount})` : "Esporta JSON filtrati";
   }
 }
 
@@ -3709,6 +3848,54 @@ async function downloadSelectedSongsJson() {
     toast(error.message, "error");
   } finally {
     showLoading(false);
+  }
+}
+
+async function exportSelectedFilteredJson() {
+  const songs = (state.db?.songs || []).filter((song) => state.selectedSongIds.has(song.id) && song.variantType !== "piano_reduction");
+  if (songs.length === 0) {
+    toast("Nessun brano selezionato", "error");
+    return;
+  }
+
+  const fileNames = songs.map((song) => `${sanitizeFileName(song.title || song.id || "song")}.json`);
+  const counts = new Map();
+  for (const name of fileNames) counts.set(name.toLowerCase(), (counts.get(name.toLowerCase()) || 0) + 1);
+  const zip = new JSZip();
+  const folder = zip.folder("json");
+  const errors = [];
+  let exported = 0;
+  showLoading(true);
+  el.exportSelectedFilteredBtn.disabled = true;
+  try {
+    for (let index = 0; index < songs.length; index += 1) {
+      const song = songs[index];
+      try {
+        const response = await fetch(song.jsonPath);
+        if (!response.ok) throw new Error("JSON non leggibile");
+        const jsonData = await response.json();
+        const all = instrumentNamesFromJson(jsonData, song);
+        const active = activeInstrumentsForSong(song, all);
+        if (active.length === 0) throw new Error("Nessuno strumento attivo");
+        const filtered = filterJsonByActiveInstruments(jsonData, song, active);
+        filtered.name = song.title || filtered.name;
+        const fileName = fileNames[index];
+        const entryPath = counts.get(fileName.toLowerCase()) > 1 ? `${song.id}/${fileName}` : fileName;
+        folder.file(entryPath, JSON.stringify(filtered, null, 2));
+        exported += 1;
+      } catch (error) {
+        errors.push(`${song.title || song.id}: ${error.message}`);
+      }
+    }
+    if (exported === 0) throw new Error(`Nessun JSON esportato. ${errors.slice(0, 2).join("; ")}`);
+    const blob = await zip.generateAsync({ type: "blob" });
+    downloadBlob(blob, "pianovisual-json-selezionati.zip");
+    toast(`${exported} JSON filtrati esportati${errors.length ? `, ${errors.length} non esportati` : ""}`, errors.length ? "error" : "ok");
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    showLoading(false);
+    updateSelectionInfo();
   }
 }
 
@@ -3860,16 +4047,10 @@ async function importJsonItems(items, readErrors = [], kind = "json-archive") {
   }
 
   const dedupMode = el.archiveDedupPolicySelect?.value || "keep_first";
-  const { kept, dropped } = dedupeJsonArchiveItems(items, dedupMode);
-  if (kept.length === 0) {
-    toast("Nessun JSON importabile dopo dedup interno", "error");
-    return null;
-  }
-
   const result = await api("/api/library/import-json-archive", {
     method: "POST",
     body: JSON.stringify({
-      items: kept,
+      items,
       conflictPolicy: el.archiveConflictPolicySelect?.value || "skip",
       dedupPolicy: dedupMode,
     }),
@@ -3877,18 +4058,14 @@ async function importJsonItems(items, readErrors = [], kind = "json-archive") {
   await refreshDb();
   render();
   const reportRows = Array.isArray(result.report) ? result.report : [];
-  const skipped = reportRows.filter((row) => row.status === "skipped").length + dropped.length;
+  const skipped = reportRows.filter((row) => row.status === "skipped").length;
   const overwritten = Number(result.overwrittenCount || 0);
   const errored = reportRows.filter((row) => row.status === "error").length + readErrors.length;
   setLastImportReport({
     kind,
     createdAt: new Date().toISOString(),
     summary: { total: items.length + readErrors.length, imported: Number(result.importedCount || 0), overwritten, skipped, errored },
-    report: [
-      ...reportRows,
-      ...dropped.map((drop) => ({ sourceFileName: drop.item?.fileName || "-", status: "skipped", reason: drop.reason })),
-      ...readErrors,
-    ],
+    report: [...reportRows, ...readErrors],
   });
   const msg = `Import JSON: ${result.importedCount} importati, ${overwritten} sovrascritti, ${skipped} saltati, ${errored} errori.`;
   toast(msg, errored > 0 ? "error" : "ok");
@@ -3965,6 +4142,8 @@ async function importJsonFolder() {
 }
 
 async function checkQuestStatus() {
+  el.questPullBtn.disabled = true;
+  el.questPushBtn.disabled = true;
   if (!window.pianovisualDesktop?.questStatus) {
     setQuestStatus("Sincronizzazione Quest disponibile solo nell'app desktop.", "error");
     return;
@@ -3972,7 +4151,13 @@ async function checkQuestStatus() {
   setQuestStatus("Ricerca Quest 3...");
   try {
     const result = await window.pianovisualDesktop.questStatus();
-    setQuestStatus(`Quest collegato (${result.serial}) · ${result.jsonCount} JSON sul dispositivo`, "ok");
+    if (!result.ok) {
+      setQuestStatus(result.message, "error");
+      return;
+    }
+    el.questPullBtn.disabled = false;
+    el.questPushBtn.disabled = false;
+    setQuestStatus(`Quest collegato (${result.serial}) - ${result.jsonCount} JSON sul dispositivo`, "ok");
   } catch (error) {
     setQuestStatus(error.message, "error");
   }
@@ -4175,33 +4360,73 @@ function bindEvents() {
   });
 
   el.visualizerLegend.addEventListener("click", async (event) => {
+    const reset = event.target.closest("[data-instrument-color-reset]");
+    if (reset) {
+      const song = getSongById(state.selectedSongId);
+      const colors = state.player.colorsBySong[song?.id];
+      if (!colors) return;
+      delete colors[reset.dataset.instrumentColorReset];
+      if (Object.keys(colors).length === 0) delete state.player.colorsBySong[song.id];
+      saveInstrumentColors();
+      renderVisualizerLegend(song.id);
+      drawVisualizerFrame();
+      return;
+    }
     const btn = event.target.closest("[data-instrument-toggle]");
-    if (!btn) return;
+    if (!btn || state.player.isUpdatingInstruments) return;
     const song = getSongById(state.selectedSongId);
     if (!song) return;
     const instrument = String(btn.dataset.instrumentToggle || "").trim();
     if (!instrument) return;
-    const loaded = state.player.loadedSongId === song.id ? state.player.availableInstruments : [];
-    const all = loaded.length ? loaded : instrumentsForSong(song);
-    const active = new Set(state.player.activeInstrumentsBySong[song.id] || all);
+    const instrumentIndex = [...el.visualizerLegend.querySelectorAll("[data-instrument-toggle]")].indexOf(btn);
     const wasPlaying = state.player.isPlaying;
     const resumeAt = Number(Tone.Transport.seconds || 0);
-    if (active.has(instrument)) active.delete(instrument);
-    else active.add(instrument);
-    state.player.activeInstrumentsBySong[song.id] = all.filter((name) => active.has(name));
-    pausePlayer();
-    stopScheduledAudio();
+    state.player.isUpdatingInstruments = true;
     let hasPlayableNotes = false;
     try {
+      await loadSelectedSongForPlayer();
+      if (state.selectedSongId !== song.id) return;
+      const all = state.player.availableInstruments;
+      const resolvedInstrument = all.includes(instrument) ? instrument : all[instrumentIndex];
+      if (!resolvedInstrument) throw new Error("Strumento non trovato nel brano");
+      const active = new Set(activeInstrumentsForSong(song, all));
+      if (active.has(resolvedInstrument)) active.delete(resolvedInstrument);
+      else active.add(resolvedInstrument);
+      state.player.activeInstrumentsBySong[song.id] = all.filter((name) => active.has(name));
+      pausePlayer();
+      stopScheduledAudio();
       hasPlayableNotes = await loadSelectedSongForPlayer(true);
+      if (state.selectedSongId !== song.id) return;
+      const selected = state.player.activeInstrumentsBySong[song.id];
+      await api(`/api/songs/${song.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ song: { activeInstruments: selected } }),
+      });
+      song.activeInstruments = selected.slice();
+      toast(`${resolvedInstrument}: ${active.has(resolvedInstrument) ? "attivato" : "disattivato"} e salvato`, "ok");
     } catch (error) {
-      toast(error.message, "error");
+      toast(`Selezione non salvata: ${error.message}`, "error");
+    } finally {
+      state.player.isUpdatingInstruments = false;
     }
+    if (state.selectedSongId !== song.id) return;
     render();
     if (wasPlaying && hasPlayableNotes) await playPlayer(resumeAt);
     else drawVisualizerFrame();
-    const on = active.has(instrument);
-    toast(`${instrument}: ${on ? "attivato" : "disattivato"}`, "ok");
+  });
+  el.visualizerLegend.addEventListener("change", (event) => {
+    const input = event.target.closest("[data-instrument-color]");
+    const song = getSongById(state.selectedSongId);
+    if (!input || !song || !/^#[0-9a-f]{6}$/i.test(input.value)) return;
+    const instrument = input.dataset.instrumentColor;
+    const loaded = state.player.loadedSongId === song.id ? state.player.availableInstruments : [];
+    const all = loaded.length ? loaded : instrumentsForSong(song);
+    if (!all.includes(instrument)) return;
+    state.player.colorsBySong[song.id] ||= {};
+    state.player.colorsBySong[song.id][instrument] = input.value.toLowerCase();
+    saveInstrumentColors();
+    renderVisualizerLegend(song.id);
+    drawVisualizerFrame();
   });
   el.pageSizeSelect.addEventListener("change", () => {
     state.pageSize = Number(el.pageSizeSelect.value || 10);
@@ -4221,9 +4446,17 @@ function bindEvents() {
 
   el.songsTableBody.addEventListener("click", onTableClick);
   el.playlistsCards.addEventListener("click", onDirectoryPanelClick);
+  el.playlistsCards.addEventListener("submit", (event) => {
+    const form = event.target.closest("[data-rename-playlist-form]");
+    if (!form) return;
+    event.preventDefault();
+    const name = form.elements.namedItem("name")?.value || "";
+    void renamePlaylistById(form.dataset.renamePlaylistForm, name);
+  });
   el.selectVisibleBtn.addEventListener("click", selectVisibleSongs);
   el.clearSelectionBtn.addEventListener("click", clearSelectedSongs);
   el.downloadSelectedBtn.addEventListener("click", downloadSelectedSongsJson);
+  el.exportSelectedFilteredBtn.addEventListener("click", exportSelectedFilteredJson);
   el.convertSelectedPianoBtn.addEventListener("click", createSelectedPianoReductions);
   el.deleteSelectedBtn.addEventListener("click", deleteSelectedSongs);
   el.selectAllPageCheckbox.addEventListener("change", () => {
@@ -4342,6 +4575,18 @@ function bindEvents() {
   el.downloadImportReportBtn.addEventListener("click", downloadLastImportReport);
 
   el.newPlaylistBtn.addEventListener("click", createPlaylist);
+  el.playlistCreateBtn.addEventListener("click", () => {
+    el.playlistCreateForm.classList.toggle("hidden");
+    if (!el.playlistCreateForm.classList.contains("hidden")) el.playlistCreateName.focus();
+  });
+  el.playlistCreateForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (el.playlistCreateName.value.trim()) void createPlaylist(el.playlistCreateName.value);
+  });
+  el.playlistCreateForm.querySelector("[data-cancel-playlist-create]").addEventListener("click", () => {
+    el.playlistCreateForm.classList.add("hidden");
+    el.playlistCreateForm.reset();
+  });
   el.managePlaylistBtn.addEventListener("click", managePlaylist);
   el.backupBtn.addEventListener("click", exportBackup);
   el.importJsonFolderBtn.addEventListener("click", importJsonFolder);
@@ -4435,6 +4680,7 @@ function bindEvents() {
 }
 
 async function bootstrap() {
+  loadInstrumentColors();
   try {
     applyTheme(localStorage.getItem("pv_theme") || "dark", false);
   } catch {
@@ -4447,6 +4693,7 @@ async function bootstrap() {
   bindEvents();
   await refreshDb();
   render();
+  if (window.pianovisualDesktop?.questStatus) void checkQuestStatus();
 }
 
 bootstrap().catch((error) => {

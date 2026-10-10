@@ -9,11 +9,13 @@ release/
 # runtime/local library data
 library/json/*
 !library/json/.gitkeep
+library/jsonpiano/*
 library/exports/*
 !library/exports/.gitkeep
 
 # local database state
 library/db.json
+library/dbpiano.json
 library/db.backup-*.json
 library/*.tmp
 

@@ -6,6 +6,7 @@ const crypto = require("node:crypto");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 const { pathToFileURL } = require("node:url");
+const { parseAdbDevices, findWindowsMtpQuest } = require("./quest-connection.cjs");
 
 const execFileAsync = promisify(execFile);
 const QUEST_JSON_DIR = "/sdcard/Android/data/com.ZarApps.PianoVision/files";
@@ -106,15 +107,9 @@ async function runAdb(args) {
 }
 
 async function getQuestDevice() {
-  const { stdout } = await runAdb(["devices"]);
-  const rows = stdout.split(/\r?\n/).slice(1).map((line) => line.trim()).filter(Boolean);
-  const authorized = rows.filter((line) => /\tdevice$/.test(line)).map((line) => line.split(/\s+/)[0]);
-  if (authorized.length === 0) {
-    const unauthorized = rows.some((line) => /\tunauthorized$/.test(line));
-    throw new Error(unauthorized ? "Quest collegato ma non autorizzato: conferma il debug USB nel visore." : "Nessun Quest autorizzato rilevato via ADB.");
-  }
-  if (authorized.length > 1) throw new Error("Sono collegati più dispositivi ADB. Lascia collegato solo il Quest da sincronizzare.");
-  return authorized[0];
+  const status = parseAdbDevices((await runAdb(["devices"])).stdout);
+  if (status.code !== "ready") throw new Error(status.message);
+  return status.serial;
 }
 
 async function remoteQuestFiles(serial) {
@@ -270,9 +265,25 @@ ipcMain.handle("json:select-folder", async () => {
 });
 
 ipcMain.handle("quest:status", async () => {
-  const serial = await getQuestDevice();
-  const files = await remoteQuestFiles(serial);
-  return { ok: true, serial, remotePath: QUEST_JSON_DIR, jsonCount: files.length };
+  let status;
+  try {
+    status = parseAdbDevices((await runAdb(["devices"])).stdout);
+  } catch (error) {
+    status = { code: "adb-error", message: error.message };
+  }
+  if (status.code !== "ready") {
+    const mtpName = await findWindowsMtpQuest();
+    if (mtpName && status.code === "none") {
+      return {
+        ok: false,
+        connection: "mtp",
+        message: `${mtpName} collegato per il trasferimento file (MTP), ma non rilevato via ADB. Attiva la modalita sviluppatore e il debug USB, autorizza questo PC nel visore e premi Rileva Quest 3.`,
+      };
+    }
+    return { ok: false, connection: mtpName ? "mtp" : "none", message: status.message };
+  }
+  const files = await remoteQuestFiles(status.serial);
+  return { ok: true, serial: status.serial, remotePath: QUEST_JSON_DIR, jsonCount: files.length };
 });
 
 ipcMain.handle("quest:pull-json", async () => {

@@ -287,6 +287,7 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
 }
 
@@ -451,12 +452,12 @@ textarea {
 .content-grid {
   margin-top: 12px;
   display: grid;
-  grid-template-columns: 1fr 360px;
+  grid-template-columns: minmax(0, 1fr) clamp(420px, 36%, 560px);
   gap: 12px;
 }
 
 .content-grid.single-column {
-  grid-template-columns: 1fr;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .content-grid.piano-workspace .library-area,
@@ -594,10 +595,25 @@ textarea {
 .library-area,
 .detail-panel {
   padding: 12px;
+  min-width: 0;
+}
+
+.detail-panel {
+  position: sticky;
+  top: 12px;
+  align-self: start;
+  max-height: calc(100dvh - 160px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+#detailContent {
+  min-width: 0;
 }
 
 .section-head {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 10px;
   align-items: flex-end;
@@ -624,6 +640,8 @@ textarea {
 
 .section-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
 }
 
@@ -1113,6 +1131,15 @@ tbody tr.active {
   gap: 8px;
 }
 
+.song-source-name {
+  display: block;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--spotify-soft);
+}
+
 .cover {
   width: 38px;
   height: 38px;
@@ -1144,6 +1171,68 @@ tbody tr.active {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
+}
+
+.playlist-section-head,
+.playlist-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.playlist-section-head {
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.playlist-section-head h3 {
+  margin: 0;
+}
+
+.playlist-card strong {
+  overflow-wrap: anywhere;
+}
+
+.playlist-card-actions {
+  margin-top: 10px;
+}
+
+.playlist-edit-form {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.playlist-edit-form label {
+  display: grid;
+  gap: 4px;
+  flex: 1 1 180px;
+}
+
+.playlist-edit-form input {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.playlist-icon-btn {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  background: #222;
+  color: #fff;
+  font: inherit;
+  font-size: 1.1rem;
+  cursor: pointer;
+}
+
+.playlist-icon-btn:hover,
+.playlist-icon-btn:focus-visible {
+  border-color: var(--spotify-green);
 }
 
 .smart-card {
@@ -1399,6 +1488,12 @@ tbody tr.active {
   font-size: 1.1rem;
 }
 
+.detail-title,
+.detail-subtitle,
+.detail-meta li {
+  overflow-wrap: anywhere;
+}
+
 .detail-meta {
   list-style: none;
   padding: 0;
@@ -1452,7 +1547,11 @@ tbody tr.active {
 }
 
 #visualizerCanvas {
+  display: block;
   width: 100%;
+  max-width: 100%;
+  height: auto;
+  box-sizing: border-box;
   margin-top: 8px;
   border: 1px solid #2a2a2a;
   border-radius: 10px;
@@ -1464,11 +1563,54 @@ tbody tr.active {
   flex-wrap: wrap;
   gap: 4px;
   flex: 1;
+  min-width: 0;
+}
+
+.viz-legend-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 24px;
+}
+
+.viz-color-input,
+.viz-color-reset {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  padding: 1px;
+  border: 1px solid #5a6570;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.viz-color-input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.viz-color-input::-webkit-color-swatch {
+  border: 0;
+  border-radius: 2px;
+}
+
+.viz-color-reset {
+  color: var(--spotify-soft);
+  font: inherit;
+  font-size: 17px;
+  line-height: 1;
+}
+
+.viz-color-input:focus-visible,
+.viz-color-reset:focus-visible {
+  outline: 2px solid var(--spotify-green);
+  outline-offset: 1px;
 }
 
 .visualizer-controls {
   margin-top: 5px;
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 6px;
 }
@@ -2032,11 +2174,21 @@ tbody tr.active {
 
 @media (max-width: 1180px) {
   .content-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .detail-panel {
+    position: static;
+    max-height: none;
+    overflow: visible;
   }
 }
 
 @media (max-width: 900px) {
+  #playlistsCards:not(.home-dashboard) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .app-shell {
     grid-template-columns: 1fr;
     height: 100vh;

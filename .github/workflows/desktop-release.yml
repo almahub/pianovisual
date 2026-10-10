@@ -55,6 +55,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run dist:win -- --publish always
 
+      - name: Publish release notes
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$env:GITHUB_REF_NAME" --notes-file "RELEASE_NOTES_$env:GITHUB_REF_NAME.md"
+
       - name: Keep only the latest three desktop releases
         shell: pwsh
         env:

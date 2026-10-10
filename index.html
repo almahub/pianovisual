@@ -70,8 +70,8 @@
           <summary><span aria-hidden="true">◉</span> Quest 3</summary>
           <div class="sidebar-group-content sidebar-action-list">
             <button id="questStatusBtn" class="chip">Rileva Quest 3</button>
-            <button id="questPullBtn" class="chip">Importa JSON dal Quest</button>
-            <button id="questPushBtn" class="chip">Invia JSON al Quest</button>
+            <button id="questPullBtn" class="chip" disabled>Importa JSON dal Quest</button>
+            <button id="questPushBtn" class="chip" disabled>Invia JSON al Quest</button>
             <p id="questStatusText" class="mini-note">Richiede ADB e debug USB.</p>
           </div>
         </details>
@@ -152,6 +152,7 @@
                 <div id="libraryToolbar" class="section-actions hidden">
                   <button id="selectVisibleBtn" class="btn subtle" type="button">Seleziona visibili</button>
                   <button id="convertSelectedPianoBtn" class="btn piano-btn" type="button" disabled>Converti selezionati in piano</button>
+                  <button id="exportSelectedFilteredBtn" class="btn" type="button" disabled>Esporta JSON filtrati</button>
                   <button id="deleteSelectedBtn" class="btn subtle danger" type="button" disabled>Elimina selezionati</button>
                   <details class="toolbar-menu">
                     <summary class="btn subtle">Altre azioni</summary>
@@ -407,7 +408,16 @@
               </div>
 
               <section id="playlistsSection" class="smart-playlists hidden">
-                <h3 id="playlistsSectionTitle">Le Tue Playlist</h3>
+                <div class="playlist-section-head">
+                  <h3 id="playlistsSectionTitle">Le Tue Playlist</h3>
+                  <button id="playlistCreateBtn" class="btn hidden" type="button">Nuova playlist</button>
+                </div>
+                <form id="playlistCreateForm" class="playlist-edit-form hidden">
+                  <label for="playlistCreateName">Nome playlist</label>
+                  <input id="playlistCreateName" type="text" maxlength="120" required />
+                  <button class="btn" type="submit">Crea</button>
+                  <button class="btn subtle" type="button" data-cancel-playlist-create>Annulla</button>
+                </form>
                 <div id="playlistsCards" class="smart-cards"></div>
               </section>
 
