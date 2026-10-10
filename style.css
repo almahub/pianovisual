@@ -1244,6 +1244,47 @@ tbody tr.active {
   color: var(--spotify-soft);
 }
 
+.artist-card {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 10px;
+}
+
+.artist-card .artist-photo {
+  grid-row: 1 / span 3;
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 6px;
+  background: #31584a;
+  color: #fff;
+  font-weight: 700;
+}
+
+.artist-photo a,
+.artist-photo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.artist-photo img {
+  object-fit: cover;
+}
+
+.artist-card > strong,
+.artist-card > p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.artist-card > .chip {
+  justify-self: start;
+}
+
 .smart-cards.home-dashboard {
   grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
   gap: 12px;

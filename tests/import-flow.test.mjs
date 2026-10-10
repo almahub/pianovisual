@@ -6,7 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 
 const root = process.cwd();
-const libraryDir = path.join(root, 'library');
+const libraryDir = path.join(os.tmpdir(), `pianovisual-test-${process.pid}-${Date.now()}`);
 const jsonDir = path.join(libraryDir, 'json');
 const pianoJsonDir = path.join(libraryDir, 'jsonpiano');
 const dbPath = path.join(libraryDir, 'db.json');
@@ -15,7 +15,6 @@ const PORT = 6199;
 const BASE = `http://127.0.0.1:${PORT}`;
 
 let serverProc;
-let backupDir;
 
 function defaultDb() {
   return {
@@ -147,11 +146,10 @@ async function waitForServer() {
 }
 
 test.before(async () => {
-  backupDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pianovisual-lib-backup-'));
-  await fs.cp(libraryDir, backupDir, { recursive: true });
+  await fs.mkdir(libraryDir, { recursive: true });
   serverProc = spawn('node', ['server.js'], {
     cwd: root,
-    env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1' },
+    env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1', PIANOVISUAL_LIBRARY_DIR: libraryDir },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   await waitForServer();
@@ -163,12 +161,80 @@ test.after(async () => {
     await new Promise((r) => setTimeout(r, 200));
   }
   await fs.rm(libraryDir, { recursive: true, force: true });
-  await fs.cp(backupDir, libraryDir, { recursive: true });
-  await fs.rm(backupDir, { recursive: true, force: true });
 });
 
 test.beforeEach(async () => {
   await resetLibrary();
+});
+
+test('exported JSON restores edited song metadata after reimport', async () => {
+  const appSource = await fs.readFile(path.join(root, 'app.js'), 'utf8');
+  const metadataSource = appSource.slice(
+    appSource.indexOf('function jsonWithSongMetadata('),
+    appSource.indexOf('async function exportFilteredSongJson()'),
+  );
+  const jsonWithSongMetadata = new Function(`${metadataSource}\nreturn jsonWithSongMetadata;`)();
+  const exported = jsonWithSongMetadata(makeCompatiblePianoVisionJson(), {
+    title: 'Titolo corretto', artist: 'Artista corretto', composer: 'Compositore corretto', genre: 'Jazz',
+  });
+  const result = await api('/api/library/import-json-archive', {
+    method: 'POST',
+    body: JSON.stringify({ items: [{ fileName: 'titolo-corretto.json', jsonData: exported }] }),
+  });
+  assert.equal(result.importedCount, 1);
+  const [song] = (await api('/api/library')).songs;
+  assert.equal(song.title, 'Titolo corretto');
+  assert.equal(song.artist, 'Artista corretto');
+  assert.equal(song.composer, 'Compositore corretto');
+  assert.equal(song.genre, 'Jazz');
+  assert.equal(exported.original.tracks.length, 3);
+});
+
+test('JSON archive import repairs only matching supporting instrument mappings', async () => {
+  const jsonData = makeCompatiblePianoVisionJson();
+  jsonData.supportingTracks.forEach((track) => { track.theirInstrument = 0; });
+  const result = await api('/api/library/import-json-archive', {
+    method: 'POST', body: JSON.stringify({ items: [{ fileName: 'mapped.json', jsonData }] }),
+  });
+  assert.equal(result.importedCount, 1);
+  const [song] = (await api('/api/library')).songs;
+  const stored = JSON.parse(await fs.readFile(path.join(jsonDir, path.basename(song.jsonPath)), 'utf8'));
+  assert.deepEqual(stored.supportingTracks.map((track) => track.theirInstrument), [0, 1, 2]);
+
+  const mismatched = makeCompatiblePianoVisionJson();
+  mismatched.supportingTracks[1].theirInstrument = 75;
+  mismatched.supportingTracks[1].notes = [...mismatched.supportingTracks[1].notes];
+  mismatched.supportingTracks[1].notes[0] = { ...mismatched.supportingTracks[1].notes[0], midi: 12 };
+  const second = await api('/api/library/import-json-archive', {
+    method: 'POST', body: JSON.stringify({ items: [{ fileName: 'mismatched.json', jsonData: mismatched }] }),
+  });
+  assert.equal(second.importedCount, 1);
+  const imported = (await api('/api/library')).songs.find((entry) => entry.sourceFileName === 'mismatched.json');
+  const untouched = JSON.parse(await fs.readFile(path.join(jsonDir, path.basename(imported.jsonPath)), 'utf8'));
+  assert.equal(untouched.supportingTracks[1].theirInstrument, 75);
+
+  const custom = makeCompatiblePianoVisionJson();
+  custom.supportingTracks[1].theirInstrument = 75;
+  const third = await api('/api/library/import-json-archive', {
+    method: 'POST', body: JSON.stringify({ items: [{ fileName: 'custom-map.json', jsonData: custom }] }),
+  });
+  assert.equal(third.importedCount, 1);
+  const customSong = (await api('/api/library')).songs.find((entry) => entry.sourceFileName === 'custom-map.json');
+  const customStored = JSON.parse(await fs.readFile(path.join(jsonDir, path.basename(customSong.jsonPath)), 'utf8'));
+  assert.equal(customStored.supportingTracks[1].theirInstrument, 75);
+});
+
+test('MIDI batch import also repairs legacy supporting mappings', async () => {
+  const item = makeItem({ title: 'Mapped MIDI' });
+  item.jsonData = makeCompatiblePianoVisionJson();
+  item.jsonData.supportingTracks.forEach((track) => { track.theirInstrument = 0; });
+  const result = await api('/api/library/import-batch', {
+    method: 'POST', body: JSON.stringify({ items: [item] }),
+  });
+  assert.equal(result.importedCount, 1);
+  const [song] = (await api('/api/library')).songs;
+  const stored = JSON.parse(await fs.readFile(path.join(jsonDir, path.basename(song.jsonPath)), 'utf8'));
+  assert.deepEqual(stored.supportingTracks.map((track) => track.theirInstrument), [0, 1, 2]);
 });
 
 test('playlist rename rejects duplicate names and deletion keeps library songs', async () => {
@@ -204,7 +270,7 @@ test('active instruments persist per song without changing the music JSON', asyn
   });
   assert.equal(imported.importedCount, 1);
   const song = (await api('/api/library')).songs[0];
-  const jsonPath = path.join(root, song.jsonPath.replace(/^\//, ''));
+  const jsonPath = path.join(jsonDir, path.basename(song.jsonPath));
   const originalJson = await fs.readFile(jsonPath, 'utf8');
 
   await api(`/api/songs/${song.id}`, {

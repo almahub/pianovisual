@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+## [1.0.30] - 2026-10-10
+### Fixed
+- Esportazione JSON singola, multipla e da Visualizer: autore, compositore e genere ora seguono i metadati salvati nel catalogo e sono recuperabili alla reimportazione.
+- Selezione ed esportazione per singola traccia: parti con lo stesso nome di strumento si possono attivare e filtrare separatamente; le vecchie selezioni per nome restano leggibili.
+- Conversione MIDI e import JSON: `supportingTracks[].theirInstrument` usa lo strumento originale quando la corrispondenza delle note e verificabile.
+
+### Added
+- Miniature degli artisti nella vista Artisti, recuperate online da Wikipedia con fallback locale e senza scaricare immagini nella libreria.
+- Test di importazione isolati dalla libreria musicale reale.
+
 ## [1.0.29] - 2026-10-10
 ### Added
 - Esportazione multipla dei JSON filtrati secondo gli strumenti attivi salvati per ogni brano, senza cambiare il titolo dei file.

@@ -53,7 +53,7 @@ Il repository contiene il template `library/db.example.json` e i due file dimost
   3. usa l'icona `PianoVisual` sul desktop
 
 ## App desktop installabile (Electron)
-Versione rilasciata piu recente nel repository: **v1.0.29**. Vedi [note di rilascio v1.0.29](RELEASE_NOTES_v1.0.29.md) e [changelog completo](CHANGELOG.md). Le modifiche locali non ancora rilasciate sono indicate come `Unreleased` nel changelog.
+Versione rilasciata piu recente nel repository: **v1.0.30**. Vedi [note di rilascio v1.0.30](RELEASE_NOTES_v1.0.30.md) e [changelog completo](CHANGELOG.md). Le modifiche locali non ancora rilasciate sono indicate come `Unreleased` nel changelog.
 
 ### Avvio desktop locale
 ```bash

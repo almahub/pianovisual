@@ -578,6 +578,26 @@ function inferSongMetadataFromJson(jsonData, fileName) {
   };
 }
 
+function mapSupportingInstruments(jsonData) {
+  const original = Array.isArray(jsonData?.original?.tracks) ? jsonData.original.tracks : [];
+  const supporting = Array.isArray(jsonData?.supportingTracks) ? jsonData.supportingTracks : [];
+  const playable = original.filter((track) => Array.isArray(track?.notes) && track.notes.length > 0);
+  if (!supporting.length || supporting.length !== playable.length) return jsonData;
+  const mapped = supporting.map((track, index) => {
+    const source = playable[index];
+    const number = source?.instrument?.number;
+    const notes = track?.notes;
+    if (!Number.isInteger(number) || number < 1 || number > 127 || !Array.isArray(notes) ||
+        notes.length !== source.notes.length || track?.theirInstrument !== 0) return track;
+    const sameNote = (a, b) => Number(a?.midi) === Number(b?.midi) &&
+      Math.abs(Number(a?.time) - Number(b?.time)) < 0.001;
+    if (!notes.every((note, noteIndex) => sameNote(note, source.notes[noteIndex]))) return track;
+    return { ...track, theirInstrument: number };
+  });
+  return mapped.some((track, index) => track !== supporting[index])
+    ? { ...jsonData, supportingTracks: mapped } : jsonData;
+}
+
 function validatePianoVisionJsonData(jsonData) {
   const errors = [];
   if (!jsonData || typeof jsonData !== "object" || Array.isArray(jsonData)) {
@@ -1279,7 +1299,7 @@ async function handleApi(req, res, url) {
     for (const item of kept) {
       const fileName = sanitizeName(item.fileName || `${uid("song")}.json`);
       const safeFile = fileName.endsWith(".json") ? fileName : `${fileName}.json`;
-      const jsonData = item.jsonData;
+      const jsonData = mapSupportingInstruments(item.jsonData);
       if (!jsonData || typeof jsonData !== "object") {
         const reason = "json non valido";
         skipped.push({ fileName: safeFile, reason });
@@ -1647,7 +1667,7 @@ async function handleApi(req, res, url) {
     for (const item of kept) {
       const midiBase64 = item.midiBase64;
       const songMeta = item.song || {};
-      const jsonData = item.jsonData;
+      const jsonData = mapSupportingInstruments(item.jsonData);
       const sourceFileName = sanitizeName(item.sourceFileName || "song.mid");
       if (!midiBase64 || !jsonData) {
         skipped.push({ sourceFileName, reason: "payload incompleto", existingSongId: "" });

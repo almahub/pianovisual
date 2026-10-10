@@ -105,13 +105,13 @@ test("visualizer export rebuilds PianoVision tracks from selected instruments", 
   assert.equal(app.includes('`${base}-filtered.json`'), false);
 });
 
-test("visualizer reads JSON track names and filters only selected instruments", async () => {
+test("visualizer filters selected tracks even when instrument names repeat", async () => {
   const app = await fs.readFile(path.join(root, "app.js"), "utf8");
-  const filterSource = app.slice(app.indexOf("function trackInstrumentNameFromJson("), app.indexOf("async function exportFilteredSongJson()"));
+  const filterSource = app.slice(app.indexOf("function filterJsonByActiveInstruments("), app.indexOf("async function exportFilteredSongJson()"));
   const tracksSource = app.slice(app.indexOf("function extractPianoReductionTracks("), app.indexOf("function buildPlayableNotesFromTracks("));
   const build = new Function("repairMojibake", "instrumentsForSong", "clamp01", "buildTracksV2",
-    `${filterSource}\n${tracksSource}\nreturn { instrumentNamesFromJson, filterJsonByActiveInstruments };`);
-  const { instrumentNamesFromJson, filterJsonByActiveInstruments } = build(
+    `${filterSource}\n${tracksSource}\nreturn { trackOptionsFromJson, filterJsonByActiveInstruments };`);
+  const { trackOptionsFromJson, filterJsonByActiveInstruments } = build(
     (value) => value,
     (song) => song.instruments || [],
     (value) => value,
@@ -122,30 +122,121 @@ test("visualizer reads JSON track names and filters only selected instruments", 
     name: "Brano",
     original: { tracks: [
       { instrument: { name: "Piano" }, notes: [{ midi: 60, time: 0, duration: 1 }] },
-      { instrument: { name: "Violino" }, notes: [{ midi: 67, time: 1, duration: 1 }] },
+      { instrument: { name: "Piano" }, notes: [{ midi: 67, time: 1, duration: 1 }] },
     ] },
     supportingTracks: [{ notes: [{ midi: 60, time: 0, duration: 1 }] }, { notes: [{ midi: 67, time: 1, duration: 1 }] }],
+    accompanyingInstruments: [0, 0],
+    accompanyingTracks: [{ midi: 60, trackId: 0 }, { midi: 67, trackId: 1 }],
   };
-  assert.deepEqual(instrumentNamesFromJson(json, song), ["Piano", "Violino"]);
-  const filtered = filterJsonByActiveInstruments(json, song, ["Piano"]);
+  assert.deepEqual(trackOptionsFromJson(json, song), [
+    { id: "track:0", instrument: "Piano" }, { id: "track:1", instrument: "Piano" },
+  ]);
+  const filtered = filterJsonByActiveInstruments(json, song, ["track:1"]);
   assert.equal(filtered.name, "Brano");
   assert.equal(filtered.original.tracks.length, 1);
   assert.equal(filtered.original.tracks[0].instrument.name, "Piano");
   assert.equal(filtered.supportingTracks.length, 1);
+  assert.equal(filtered.supportingTracks[0].notes[0].midi, 67);
+  assert.deepEqual(filtered.accompanyingTracks, [{ midi: 67, trackId: 0 }]);
+  assert.equal(filtered.accompanyingInstruments.length, 1);
   assert.equal(json.original.tracks.length, 2);
 
   const supportingOnlyNotes = structuredClone(json);
   for (const track of supportingOnlyNotes.original.tracks) track.notes = [];
-  assert.deepEqual(instrumentNamesFromJson(supportingOnlyNotes, song), ["Piano", "Violino"]);
-  const filteredSupporting = filterJsonByActiveInstruments(supportingOnlyNotes, song, ["Violino"]);
+  assert.deepEqual(trackOptionsFromJson(supportingOnlyNotes, song).map((entry) => entry.id), ["support:0", "support:1"]);
+  const filteredSupporting = filterJsonByActiveInstruments(supportingOnlyNotes, song, ["support:1"]);
   assert.equal(filteredSupporting.supportingTracks.length, 1);
   assert.equal(filteredSupporting.supportingTracks[0].notes[0].midi, 67);
 
   const handsOnly = { tracksV2: { right: [{ notes: [{ note: 60, start: 0, duration: 1 }] }], left: [{ notes: [{ note: 48, start: 0, duration: 1 }] }] } };
-  assert.deepEqual(instrumentNamesFromJson(handsOnly, song), ["Mano destra", "Mano sinistra"]);
-  const filteredHands = filterJsonByActiveInstruments(handsOnly, song, ["Mano destra"]);
+  assert.deepEqual(trackOptionsFromJson(handsOnly, song).map((entry) => entry.id), ["hand:right", "hand:left"]);
+  const filteredHands = filterJsonByActiveInstruments(handsOnly, song, ["hand:right"]);
   assert.equal(filteredHands.tracksV2.right[0].notes.length, 1);
   assert.equal(filteredHands.tracksV2.left[0].notes.length, 0);
+
+  const withEmpty = structuredClone(json);
+  withEmpty.original.tracks.unshift({ instrument: { name: "Piano" }, notes: [] });
+  withEmpty.accompanyingInstruments.unshift(0);
+  const filteredWithEmpty = filterJsonByActiveInstruments(withEmpty, song, ["track:2"]);
+  assert.equal(filteredWithEmpty.supportingTracks[0].notes[0].midi, 67);
+  assert.equal(filteredWithEmpty.original.tracks.length, 1);
+
+  const tenTracks = {
+    original: { tracks: Array.from({ length: 10 }, (_, idx) => ({
+      instrument: { name: "Piano" }, notes: [{ midi: 60 + idx, time: idx, duration: 1 }],
+    })) },
+    supportingTracks: Array.from({ length: 10 }, (_, idx) => ({ notes: [{ midi: 60 + idx, time: idx, duration: 1 }] })),
+  };
+  assert.equal(filterJsonByActiveInstruments(tenTracks, song, ["track:9"]).supportingTracks.length, 1);
+  assert.equal(filterJsonByActiveInstruments(tenTracks, song, ["track:9"]).supportingTracks[0].notes[0].midi, 69);
+  assert.equal(filterJsonByActiveInstruments(tenTracks, song, Array.from({ length: 10 }, (_, idx) => `track:${idx}`)).supportingTracks.length, 10);
+});
+
+test("legacy instrument-name selection maps to all matching track ids", async () => {
+  const app = await fs.readFile(path.join(root, "app.js"), "utf8");
+  const source = app.slice(app.indexOf("function activeInstrumentsForSong("), app.indexOf("function renderDetail()"));
+  const selected = new Function("state", `${source}\nreturn activeInstrumentsForSong;`)({ player: { activeInstrumentsBySong: {} } });
+  const options = [
+    { id: "track:0", instrument: "Piano" },
+    { id: "track:1", instrument: "Piano" },
+    { id: "track:2", instrument: "Violino" },
+  ];
+  assert.deepEqual(selected({ id: "song", activeInstruments: ["Piano"] }, options), ["track:0", "track:1"]);
+  assert.deepEqual(selected({ id: "song", activeInstruments: ["track:1"] }, options), ["track:1"]);
+});
+
+test("visualizer plays only selected track when names repeat", async () => {
+  const app = await fs.readFile(path.join(root, "app.js"), "utf8");
+  const source = app.slice(app.indexOf("function buildPlayableNotesFromTracks("), app.indexOf("function renderVisualizerLegend("));
+  const buildPlayableNotesFromTracks = new Function(`${source}\nreturn buildPlayableNotesFromTracks;`)();
+  const groups = [
+    { id: "track:0", instrument: "Piano", notes: [{ midi: 60, time: 0, duration: 1 }] },
+    { id: "track:1", instrument: "Piano", notes: [{ midi: 72, time: 1, duration: 1 }] },
+  ];
+  assert.deepEqual(buildPlayableNotesFromTracks(groups, ["track:1"]).notes.map((note) => note.midi), [72]);
+});
+
+test("MIDI conversion maps each supporting track to its instrument number", async () => {
+  const app = await fs.readFile(path.join(root, "app.js"), "utf8");
+  const source = app.slice(app.indexOf("function buildOutput("), app.indexOf("function midiMainKey("));
+  const buildOutput = new Function("buildMeasures", "buildTracksV2", "normalizeTempos", "mapOriginal", "round", "clamp01", "ticksToSeconds",
+    `${source}\nreturn buildOutput;`)(
+    () => [], () => ({ right: [], left: [] }), () => [{ bpm: 120, ticks: 0, time: 0 }],
+    () => ({ tracks: [] }), (value) => value, (value) => value, () => 0,
+  );
+  const track = (number, midi) => ({ instrument: { number }, notes: [{ midi, time: 0, duration: 1, velocity: 0.7 }] });
+  const json = buildOutput({ header: { ppq: 480 }, tracks: [track(0, 60), track(40, 64), track(73, 67)] }, {});
+  assert.deepEqual(json.supportingTracks.map((item) => item.theirInstrument), [0, 40, 73]);
+  assert.equal(json.supportingTracks[1].notes[0].midi, 64);
+});
+
+test("artist cards load a matching online thumbnail without storing it in song JSON", async () => {
+  const app = await fs.readFile(path.join(root, "app.js"), "utf8");
+  const source = app.slice(app.indexOf("async function renderArtistPhotos()"), app.indexOf("function shouldShowTable()"));
+  let attached;
+  const target = {
+    dataset: { artistPhoto: "Vasco Rossi" },
+    querySelector: () => null,
+    replaceChildren: (node) => { attached = node; },
+  };
+  const state = { view: "artists", artistPhotos: new Map(), artistPhotosLoading: false };
+  const renderArtistPhotos = new Function("state", "el", "document", "fetch", "URLSearchParams",
+    `${source}\nreturn renderArtistPhotos;`)(
+    state,
+    { playlistsCards: { querySelectorAll: () => [target] } },
+    { createElement: (tag) => ({ tag, append(child) { this.child = child; } }) },
+    async (url) => {
+      assert.match(url, /it\.wikipedia\.org\/w\/api\.php/);
+      return { ok: true, json: async () => ({ query: { pages: { 1: {
+        title: "Vasco Rossi", thumbnail: { source: "https://thumb.wikimedia.org/photo.jpg" },
+      } } } }) };
+    },
+    URLSearchParams,
+  );
+  await renderArtistPhotos();
+  assert.equal(attached.tag, "a");
+  assert.equal(attached.child.src, "https://thumb.wikimedia.org/photo.jpg");
+  assert.equal(state.artistPhotos.size, 1);
 });
 
 test("batch filtered export keeps song titles and separates duplicate filenames", async () => {
@@ -159,19 +250,20 @@ test("batch filtered export keeps song titles and separates duplicate filenames"
     async generateAsync() { return entries; }
   }
   const songs = [
-    { id: "song-a", title: "Stesso Titolo", jsonPath: "/a.json", activeInstruments: ["Piano"] },
-    { id: "song-b", title: "Stesso Titolo", jsonPath: "/b.json", activeInstruments: ["Violino"] },
+    { id: "song-a", title: "Stesso Titolo", artist: "Artista A", jsonPath: "/a.json", activeInstruments: ["Piano"] },
+    { id: "song-b", title: "Stesso Titolo", artist: "Artista B", jsonPath: "/b.json", activeInstruments: ["Violino"] },
   ];
-  const run = new Function("state", "el", "toast", "showLoading", "JSZip", "fetch", "instrumentNamesFromJson",
-    "activeInstrumentsForSong", "filterJsonByActiveInstruments", "sanitizeFileName", "downloadBlob", "updateSelectionInfo",
+  const run = new Function("state", "el", "toast", "showLoading", "JSZip", "fetch", "trackOptionsFromJson",
+    "activeInstrumentsForSong", "filterJsonByActiveInstruments", "jsonWithSongMetadata", "sanitizeFileName", "downloadBlob", "updateSelectionInfo",
     `${source}\nreturn exportSelectedFilteredJson;`)(
     { db: { songs }, selectedSongIds: new Set(songs.map((song) => song.id)) },
     { exportSelectedFilteredBtn: { disabled: false } },
     () => {}, () => {}, FakeZip,
     async () => ({ ok: true, json: async () => ({ name: "Stesso Titolo" }) }),
-    () => ["Piano", "Violino"],
+    () => [{ id: "track:0", instrument: "Piano" }, { id: "track:1", instrument: "Violino" }],
     (song) => song.activeInstruments,
     (json, song, active) => ({ ...json, tracks: active }),
+    (json, song) => ({ ...json, name: song.title, artist: song.artist }),
     (name) => name,
     (blob, name) => { downloaded = { blob, name }; },
     () => {},
@@ -181,6 +273,31 @@ test("batch filtered export keeps song titles and separates duplicate filenames"
   assert.deepEqual([...entries.keys()], ["song-a/Stesso Titolo.json", "song-b/Stesso Titolo.json"]);
   assert.deepEqual(entries.get("song-a/Stesso Titolo.json").tracks, ["Piano"]);
   assert.deepEqual(entries.get("song-b/Stesso Titolo.json").tracks, ["Violino"]);
+  assert.equal(entries.get("song-a/Stesso Titolo.json").artist, "Artista A");
+  assert.equal(entries.get("song-b/Stesso Titolo.json").artist, "Artista B");
+});
+
+test("selected JSON download includes edited catalog metadata", async () => {
+  const app = await fs.readFile(path.join(root, "app.js"), "utf8");
+  const source = app.slice(app.indexOf("async function downloadSelectedSongsJson()"), app.indexOf("async function exportSelectedFilteredJson()"));
+  const entries = new Map();
+  class FakeZip {
+    folder() { return this; }
+    file(name, content) { entries.set(name, JSON.parse(content)); }
+    async generateAsync() { return entries; }
+  }
+  const song = { id: "song-a", title: "Titolo corretto", artist: "Artista corretto", jsonPath: "/library/json/song-a.json" };
+  const run = new Function("state", "toast", "showLoading", "JSZip", "fetch", "jsonWithSongMetadata",
+    "sanitizeFileName", "downloadBlob", `${source}\nreturn downloadSelectedSongsJson;`)(
+    { db: { songs: [song] }, selectedSongIds: new Set([song.id]) },
+    () => {}, () => {}, FakeZip,
+    async () => ({ ok: true, json: async () => ({ name: "Vecchio titolo", artist: "" }) }),
+    (json, entry) => ({ ...json, name: entry.title, artist: entry.artist }),
+    (name) => name, () => {},
+  );
+  await run();
+  assert.equal(entries.get("song-a.json").name, "Titolo corretto");
+  assert.equal(entries.get("song-a.json").artist, "Artista corretto");
 });
 
 test("library BPM values are formatted with two decimals", async () => {
