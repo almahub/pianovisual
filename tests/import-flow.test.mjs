@@ -190,6 +190,38 @@ test('exported JSON restores edited song metadata after reimport', async () => {
   assert.equal(exported.original.tracks.length, 3);
 });
 
+test('JSON import infers a missing artist and sync preserves manual metadata', async () => {
+  const jsonData = makeCompatiblePianoVisionJson();
+  jsonData.name = 'Agnese';
+  jsonData.artist = '';
+  await api('/api/library/import-json-archive', {
+    method: 'POST',
+    body: JSON.stringify({ items: [{ fileName: 'agnese.json', jsonData }] }),
+  });
+  const [song] = (await api('/api/library')).songs;
+  assert.equal(song.artist, 'Ivan Graziani');
+
+  const db = JSON.parse(await fs.readFile(dbPath, 'utf8'));
+  db.songs[0].artist = 'Artista scelto manualmente';
+  await fs.writeFile(dbPath, JSON.stringify(db, null, 2) + '\n');
+  await api('/api/library/sync-from-json', { method: 'POST', body: JSON.stringify({ updateExisting: true }) });
+  assert.equal((await api('/api/library')).songs[0].artist, 'Artista scelto manualmente');
+});
+
+test('library migration fills only missing artists', async () => {
+  const db = defaultDb();
+  db.songs = [
+    { id: 'song-1', title: 'Caruso', artist: '', sourceFileName: 'Caruso.json', midiPath: '' },
+    { id: 'song-2', title: 'Sally', artist: 'Interprete personalizzato', sourceFileName: 'Sally.json', midiPath: '' },
+    { id: 'song-3', title: 'Bella ciao', artist: '', sourceFileName: 'Bella ciao.json', midiPath: '' },
+  ];
+  await fs.writeFile(dbPath, JSON.stringify(db, null, 2) + '\n');
+  const songs = (await api('/api/library')).songs;
+  assert.equal(songs.find((song) => song.id === 'song-1').artist, 'Lucio Dalla');
+  assert.equal(songs.find((song) => song.id === 'song-2').artist, 'Interprete personalizzato');
+  assert.equal(songs.find((song) => song.id === 'song-3').artist, '');
+});
+
 test('JSON archive import repairs only matching supporting instrument mappings', async () => {
   const jsonData = makeCompatiblePianoVisionJson();
   jsonData.supportingTracks.forEach((track) => { track.theirInstrument = 0; });

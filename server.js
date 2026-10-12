@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { inferArtist } from "./artist-inference.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -459,6 +460,13 @@ function migrateDbSchema(db) {
       song.artist = fixedArtist;
       changed = true;
     }
+    if (!song.artist) {
+      const inferredArtist = inferArtist({ title: song.title, fileName: song.sourceFileName });
+      if (inferredArtist) {
+        song.artist = inferredArtist;
+        changed = true;
+      }
+    }
     const fixedComposer = repairMojibake(song.composer || "");
     if (fixedComposer !== song.composer) {
       song.composer = fixedComposer;
@@ -567,7 +575,7 @@ function inferSongMetadataFromJson(jsonData, fileName) {
 
   return {
     title: repairMojibake(String(jsonData?.name || baseTitle || "Senza titolo")),
-    artist: repairMojibake(String(jsonData?.artist || "")),
+    artist: repairMojibake(String(jsonData?.artist || "")) || inferArtist({ title: jsonData?.name, fileName }),
     composer: repairMojibake(String(jsonData?.composer || "")),
     genre: repairMojibake(String(jsonData?.genre || "")),
     difficulty: String(jsonData?.difficulty || "intermedio"),
@@ -1502,7 +1510,7 @@ async function handleApi(req, res, url) {
 
         if (updateExisting) {
           existing.title = repairMojibake(meta.title || existing.title || "Senza titolo");
-          existing.artist = repairMojibake(meta.artist || existing.artist || "");
+          existing.artist = repairMojibake(jsonData.artist ? meta.artist : existing.artist || meta.artist || "");
           existing.composer = repairMojibake(meta.composer || existing.composer || "");
           existing.genre = repairMojibake(meta.genre || existing.genre || "");
           existing.difficulty = meta.difficulty || existing.difficulty || "intermedio";

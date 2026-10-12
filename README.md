@@ -1,6 +1,6 @@
 # PianoVisual Batch Converter
 
-Tool desktop/web locale per convertire **piu file MIDI in JSON compatibile PianoVision** e gestire una libreria di studio.
+Tool desktop/web locale per convertire **piu file MIDI in JSON compatibile PianoVision** e gestire una libreria di studio. I brani senza artista vengono completati quando il titolo o il nome file ne permette un riconoscimento attendibile; i casi ambigui restano da verificare manualmente.
 
 ## A cosa serve
 - Conversione batch `MIDI -> JSON` (non uno alla volta)

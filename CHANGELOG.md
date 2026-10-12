@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+## [1.0.31] - 2026-10-12
+### Fixed
+- Recupero prudente dell'artista per i brani privi di metadati, usando nomi espliciti e titoli riconoscibili. I valori esistenti non vengono sovrascritti.
+- La sincronizzazione da JSON conserva un artista modificato manualmente quando il JSON non ne contiene uno.
+
 ## [1.0.30] - 2026-10-10
 ### Fixed
 - Esportazione JSON singola, multipla e da Visualizer: autore, compositore e genere ora seguono i metadati salvati nel catalogo e sono recuperabili alla reimportazione.
