@@ -3,6 +3,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("pianovisualDesktop", {
   checkUpdates: () => ipcRenderer.invoke("updater:check"),
   openLibraryFolder: () => ipcRenderer.invoke("library:open-folder"),
+  createFullBackup: (settings) => ipcRenderer.invoke("backup:create", settings),
+  restoreFullBackup: () => ipcRenderer.invoke("backup:restore"),
   saveJsonExport: (bytes, suggestedName) => ipcRenderer.invoke("library:save-json-export", bytes, suggestedName),
   selectJsonFolder: () => ipcRenderer.invoke("json:select-folder"),
   questStatus: () => ipcRenderer.invoke("quest:status"),

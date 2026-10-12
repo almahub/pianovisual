@@ -12,6 +12,8 @@ test("ui critical controls exist for key workflows", async () => {
     "appVersionBadge",
     "updateStatusBtn",
     "openLibraryFolderBtn",
+    "fullBackupBtn",
+    "restoreBackupBtn",
     "syncLibraryBtn",
     "newPlaylistBtn",
     "playlistCreateBtn",
@@ -54,7 +56,7 @@ test("secondary UI controls are grouped into collapsible sections", async () => 
 
 test("desktop bridge exposes safe export, folder import and Quest sync actions", async () => {
   const preload = await fs.readFile(path.join(root, "electron", "preload.cjs"), "utf8");
-  for (const method of ["saveJsonExport", "selectJsonFolder", "questStatus", "questPullJson", "questPreviewPush", "questPushJson"]) {
+  for (const method of ["saveJsonExport", "createFullBackup", "restoreFullBackup", "selectJsonFolder", "questStatus", "questPullJson", "questPreviewPush", "questPushJson"]) {
     assert.equal(preload.includes(`${method}:`), true, `missing desktop bridge method ${method}`);
   }
 });

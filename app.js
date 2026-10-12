@@ -65,6 +65,8 @@ const el = {
   newPlaylistBtn: document.getElementById("newPlaylistBtn"),
   managePlaylistBtn: document.getElementById("managePlaylistBtn"),
   backupBtn: document.getElementById("backupBtn"),
+  fullBackupBtn: document.getElementById("fullBackupBtn"),
+  restoreBackupBtn: document.getElementById("restoreBackupBtn"),
   importArchiveBtn: document.getElementById("importArchiveBtn"),
   importJsonFolderBtn: document.getElementById("importJsonFolderBtn"),
   jsonFolderInput: document.getElementById("jsonFolderInput"),
@@ -4646,6 +4648,12 @@ function bindEvents() {
   });
   el.managePlaylistBtn.addEventListener("click", managePlaylist);
   el.backupBtn.addEventListener("click", exportBackup);
+  if (window.pianovisualDesktop?.createFullBackup && window.pianovisualDesktop?.restoreFullBackup) {
+    el.fullBackupBtn.classList.remove("hidden");
+    el.restoreBackupBtn.classList.remove("hidden");
+    el.fullBackupBtn.addEventListener("click", createFullBackup);
+    el.restoreBackupBtn.addEventListener("click", restoreFullBackup);
+  }
   el.importJsonFolderBtn.addEventListener("click", importJsonFolder);
   el.jsonFolderInput.addEventListener("change", async () => {
     await importArchiveFiles(el.jsonFolderInput.files);
@@ -4751,6 +4759,36 @@ async function bootstrap() {
   await refreshDb();
   render();
   if (window.pianovisualDesktop?.questStatus) void checkQuestStatus();
+}
+
+async function createFullBackup() {
+  try {
+    showLoading(true);
+    const result = await window.pianovisualDesktop.createFullBackup({
+      theme: localStorage.getItem("pv_theme") || "dark",
+      visualizerColors: localStorage.getItem("pv_visualizer_colors_v1") || "{}",
+    });
+    if (!result?.canceled) toast(`Backup completo: ${result.fileCount} file - ${result.filePath}`, "ok");
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    showLoading(false);
+  }
+}
+
+async function restoreFullBackup() {
+  try {
+    showLoading(true);
+    const result = await window.pianovisualDesktop.restoreFullBackup();
+    if (result?.canceled) return;
+    localStorage.setItem("pv_theme", result.settings.theme);
+    localStorage.setItem("pv_visualizer_colors_v1", result.settings.visualizerColors);
+    window.location.reload();
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    showLoading(false);
+  }
 }
 
 bootstrap().catch((error) => {

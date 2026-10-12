@@ -7,6 +7,7 @@ const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 const { pathToFileURL } = require("node:url");
 const { parseAdbDevices, findWindowsMtpQuest } = require("./quest-connection.cjs");
+const { createBackupArchive, restoreBackupArchive } = require("./backup.cjs");
 
 const execFileAsync = promisify(execFile);
 const QUEST_JSON_DIR = "/sdcard/Android/data/com.ZarApps.PianoVision/files";
@@ -224,6 +225,42 @@ ipcMain.handle("library:open-folder", async () => {
   const result = await shell.openPath(runtimeLibraryDir());
   if (result) return { ok: false, error: result };
   return { ok: true, path: runtimeLibraryDir() };
+});
+
+ipcMain.handle("backup:create", async (_, settings) => {
+  const suggestedName = `PianoVisual-backup-${new Date().toISOString().slice(0, 10)}.zip`;
+  const selected = await dialog.showSaveDialog(mainWindow, {
+    title: "Backup completo PianoVisual",
+    defaultPath: path.join(app.getPath("downloads"), suggestedName),
+    filters: [{ name: "Backup PianoVisual", extensions: ["zip"] }],
+  });
+  if (selected.canceled || !selected.filePath) return { canceled: true };
+  return { canceled: false, ...await createBackupArchive({
+    libraryDir: runtimeLibraryDir(), targetPath: selected.filePath,
+    settings, appVersion: app.getVersion(),
+  }) };
+});
+
+ipcMain.handle("backup:restore", async () => {
+  const selected = await dialog.showOpenDialog(mainWindow, {
+    title: "Ripristina backup PianoVisual",
+    properties: ["openFile"],
+    filters: [{ name: "Backup PianoVisual", extensions: ["zip"] }],
+  });
+  if (selected.canceled || !selected.filePaths[0]) return { canceled: true };
+  const confirmation = await dialog.showMessageBox(mainWindow, {
+    type: "warning",
+    buttons: ["Annulla", "Ripristina"],
+    defaultId: 0,
+    cancelId: 0,
+    title: "Ripristina backup",
+    message: "Sostituire la libreria e le impostazioni correnti con il backup selezionato?",
+    detail: "La libreria attuale verra conservata accanto alla nuova come copia prima del ripristino.",
+  });
+  if (confirmation.response !== 1) return { canceled: true };
+  return { canceled: false, ...await restoreBackupArchive({
+    archivePath: selected.filePaths[0], libraryDir: runtimeLibraryDir(),
+  }) };
 });
 
 ipcMain.handle("library:save-json-export", async (_, bytes, suggestedName) => {

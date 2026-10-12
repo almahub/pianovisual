@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+## [1.0.32] - 2026-10-12
+### Added
+- Backup completo e ripristino della libreria desktop con database, JSON, export e preferenze; la libreria precedente resta disponibile come copia di sicurezza.
+
+### Changed
+- Solo le ultime tre `RELEASE_NOTES` restano nella repo; il changelog conserva la cronologia estesa.
+
 ## [1.0.31] - 2026-10-12
 ### Fixed
 - Recupero prudente dell'artista per i brani privi di metadati, usando nomi espliciti e titoli riconoscibili. I valori esistenti non vengono sovrascritti.
