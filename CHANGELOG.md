@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+## [1.0.33] - 2026-10-13
+### Fixed
+- Colori del Visualizer distinti e persistenti per singola traccia, anche quando piu parti hanno lo stesso nome di strumento. Le vecchie preferenze sono migrate.
+
+### Changed
+- Rimosso il riquadro Piano Lab ridondante dai dettagli del brano; la conversione dei selezionati resta disponibile.
+
 ## [1.0.32] - 2026-10-12
 ### Added
 - Backup completo e ripristino della libreria desktop con database, JSON, export e preferenze; la libreria precedente resta disponibile come copia di sicurezza.

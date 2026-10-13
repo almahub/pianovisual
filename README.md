@@ -53,7 +53,7 @@ Il repository contiene il template `library/db.example.json` e i due file dimost
   3. usa l'icona `PianoVisual` sul desktop
 
 ## App desktop installabile (Electron)
-Versione rilasciata piu recente nel repository: **v1.0.32**. Vedi [note di rilascio v1.0.32](RELEASE_NOTES_v1.0.32.md) e [changelog completo](CHANGELOG.md). Nel repository restano solo le ultime tre note di rilascio.
+Versione rilasciata piu recente nel repository: **v1.0.33**. Vedi [note di rilascio v1.0.33](RELEASE_NOTES_v1.0.33.md) e [changelog completo](CHANGELOG.md). Nel repository restano solo le ultime tre note di rilascio.
 
 ### Backup e ripristino
 Nell'app desktop, apri `File e backup` e usa `Backup completo` per salvare in uno ZIP tutta la cartella dati della libreria (database, JSON, riduzioni, export e altri file) insieme a tema e colori del Visualizer. Conserva lo ZIP fuori dalla libreria, preferibilmente anche su un altro disco: non e cifrato e contiene i tuoi dati personali. Per ripristinare, installa PianoVisual, scegli `Ripristina backup` e conferma. L'app verifica lo ZIP e conserva la libreria precedente in una cartella `library.before-restore-*` accanto alla libreria corrente. Lo ZIP non contiene l'eseguibile: la versione originale e indicata nel manifesto e si reinstalla dalla relativa release GitHub.

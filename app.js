@@ -151,8 +151,6 @@ const el = {
   visualizerLegend: document.getElementById("visualizerLegend"),
   exportVisualizerSelectionBtn: document.getElementById("exportVisualizerSelectionBtn"),
   exportVisualizerToPianoBtn: document.getElementById("exportVisualizerToPianoBtn"),
-  pianoReductionCta: document.getElementById("pianoReductionCta"),
-  createPianoReductionBtn: document.getElementById("createPianoReductionBtn"),
   footerTrackTitle: document.getElementById("footerTrackTitle"),
   footerTrackArtist: document.getElementById("footerTrackArtist"),
   miniVisualizer: document.getElementById("miniVisualizer"),
@@ -803,12 +801,13 @@ function isBlackKeyMidi(midi) {
   return p === 1 || p === 3 || p === 6 || p === 8 || p === 10;
 }
 
-function defaultInstrumentHsl(name, past = false) {
+function defaultInstrumentHsl(name, past = false, trackId = name) {
   const s = String(name || "instrument");
   let hash = 0;
   for (let i = 0; i < s.length; i += 1) hash = (hash * 31 + s.charCodeAt(i)) >>> 0;
-  const hue = hash % 360;
-  if (s.startsWith("Voce / Melodia")) {
+  const trackNumber = String(trackId).match(/^(?:track|support):(\d+)$/);
+  const hue = (hash + (trackNumber ? Number(trackNumber[1]) * 137 : 0)) % 360;
+  if (String(name).startsWith("Voce / Melodia")) {
     return past ? [39, 38, 31] : [42, 88, 66];
   }
   return past ? [hue, 30, 30] : [hue, 78, 62];
@@ -825,15 +824,30 @@ function hslToHex(hue, saturation, lightness) {
   return `#${channel(0)}${channel(8)}${channel(4)}`;
 }
 
-function colorFromInstrument(name, past = false, songId = state.selectedSongId) {
-  const custom = state.player.colorsBySong[songId]?.[name];
+function colorFromInstrument(trackId, name, past = false, songId = state.selectedSongId) {
+  const colors = state.player.colorsBySong[songId];
+  const custom = colors?.[trackId] || colors?.[name];
   if (custom) {
     if (!past) return custom;
     const shade = (offset) => Math.round(parseInt(custom.slice(offset, offset + 2), 16) * 0.52).toString(16).padStart(2, "0");
     return `#${shade(1)}${shade(3)}${shade(5)}`;
   }
-  const [hue, saturation, lightness] = defaultInstrumentHsl(name, past);
+  const [hue, saturation, lightness] = defaultInstrumentHsl(name, past, trackId);
   return `hsl(${hue} ${saturation}% ${lightness}%)`;
+}
+
+function migrateInstrumentColors(songId, tracks) {
+  const colors = state.player.colorsBySong[songId];
+  if (!colors) return;
+  let changed = false;
+  for (const [name, color] of Object.entries(colors)) {
+    const matching = tracks.filter((track) => track.instrument === name && track.id !== name);
+    if (!matching.length) continue;
+    for (const track of matching) colors[track.id] ||= color;
+    delete colors[name];
+    changed = true;
+  }
+  if (changed) saveInstrumentColors();
 }
 
 function loadInstrumentColors() {
@@ -1763,7 +1777,6 @@ function renderDetail() {
     el.emptyDetail.classList.remove("hidden");
     el.detailContent.classList.add("hidden");
     if (el.visualizerLegend) el.visualizerLegend.innerHTML = "";
-    el.pianoReductionCta?.classList.add("hidden");
     if (el.exportVisualizerSelectionBtn) {
       el.exportVisualizerSelectionBtn.textContent = "Esporta strumenti selezionati";
       el.exportVisualizerSelectionBtn.disabled = true;
@@ -1790,7 +1803,6 @@ function renderDetail() {
 
   el.detailTitle.textContent = song.title || "Senza titolo";
   el.detailSubtitle.textContent = `${song.artist || "Artista sconosciuto"} · ${song.composer || "Compositore n/d"}`;
-  el.pianoReductionCta?.classList.toggle("hidden", song.variantType === "piano_reduction");
   if (el.exportVisualizerSelectionBtn) {
     el.exportVisualizerSelectionBtn.textContent = `Esporta ${activeCount} ${activeCount === 1 ? "strumento" : "strumenti"}`;
     el.exportVisualizerSelectionBtn.disabled = activeCount === 0;
@@ -1872,34 +1884,6 @@ async function loadPianoEngineStatus() {
   } catch (error) {
     el.pianoEngineStatus.classList.add("error");
     el.pianoEngineStatus.textContent = error.message;
-  }
-}
-
-async function createPianoReduction() {
-  const song = getSongById(state.selectedSongId);
-  if (!song || song.variantType === "piano_reduction") return;
-  const existing = (state.db?.songs || []).find(
-    (item) => item.variantType === "piano_reduction" && item.derivedFromSongId === song.id,
-  );
-  const replacementNote = existing ? "\nLa riduzione esistente verrà rigenerata senza creare duplicati." : "";
-  if (!confirm(`Creare una riduzione Piano + voce di “${song.title || "Senza titolo"}”?${replacementNote}\n\nIl brano completo resterà invariato.`)) return;
-  showLoading(true);
-  if (el.createPianoReductionBtn) el.createPianoReductionBtn.disabled = true;
-  try {
-    const result = await api("/api/piano-reduction/create", {
-      method: "POST",
-      body: JSON.stringify({ songId: song.id, replaceExisting: Boolean(existing) }),
-    });
-    await refreshDb();
-    if (state.player.loadedSongId === result.song.id) state.player.loadedSongId = "";
-    state.selectedSongId = result.song.id;
-    selectNav("reductions");
-    toast(`Riduzione creata: ${result.summary.rightNotes} note mano destra, ${result.summary.leftNotes} mano sinistra`, "ok");
-  } catch (error) {
-    toast(`Riduzione non creata: ${error.message}`, "error");
-  } finally {
-    if (el.createPianoReductionBtn) el.createPianoReductionBtn.disabled = false;
-    showLoading(false);
   }
 }
 
@@ -3329,6 +3313,7 @@ function extractPianoReductionTracks(jsonData, song = null) {
   ];
   const pianoHands = hands
     .map(({ key, instrument }) => {
+      const trackId = `hand:${key}`;
       const notes = (jsonData?.tracksV2?.[key] || []).flatMap((measure) =>
         (measure?.notes || []).map((note) => ({
           midi: Number(note.note ?? note.midi ?? 60),
@@ -3336,9 +3321,10 @@ function extractPianoReductionTracks(jsonData, song = null) {
           duration: Math.max(0.05, Number(note.duration || 0.2)),
           velocity: clamp01(Number(note.velocity ?? 0.7)),
           instrument,
+          trackId,
         })),
       );
-      return { id: `hand:${key}`, instrument, notes };
+      return { id: trackId, instrument, notes };
     });
 
   return pianoHands;
@@ -3353,14 +3339,16 @@ function extractPlayableTracks(jsonData, fallbackInstruments = [], song = null) 
   if (!hasNotes(originalTracks) && !hasNotes(topLevelTracks) && !hasNotes(supportingTracks) && jsonData?.tracksV2) {
     return ["right", "left"].map((key, idx) => {
       const instrument = fallbackInstruments[idx] || (key === "right" ? "Mano destra" : "Mano sinistra");
+      const trackId = `hand:${key}`;
       const notes = (jsonData.tracksV2[key] || []).flatMap((measure) => (measure?.notes || []).map((note) => ({
         midi: Number(note.note ?? note.midi ?? 60),
         time: Number(note.start ?? note.time ?? 0),
         duration: Math.max(0.05, Number(note.duration || 0.2)),
         velocity: clamp01(Number(note.velocity ?? 0.7)),
         instrument,
+        trackId,
       })));
-      return { id: `hand:${key}`, instrument, notes };
+      return { id: trackId, instrument, notes };
     });
   }
   const namedTracks = hasNotes(originalTracks) ? originalTracks
@@ -3370,6 +3358,7 @@ function extractPlayableTracks(jsonData, fallbackInstruments = [], song = null) 
   if (namedTracks.length > 0) {
     return namedTracks
       .map((track, idx) => {
+        const trackId = `track:${idx}`;
         const instrument = repairMojibake(
           String(track?.instrument?.name || fallbackInstruments[idx] || `Track ${idx + 1}`).trim(),
         );
@@ -3379,14 +3368,16 @@ function extractPlayableTracks(jsonData, fallbackInstruments = [], song = null) 
           duration: Math.max(0.05, Number(n.duration || 0.2)),
           velocity: clamp01(Number(n.velocity || 0.7)),
           instrument,
+          trackId,
         }));
-        return { id: `track:${idx}`, instrument, notes };
+        return { id: trackId, instrument, notes };
       })
       .filter((track) => track.notes.length > 0);
   }
 
   return supportingTracks
     .map((track, idx) => {
+      const trackId = `support:${idx}`;
       const instrument = repairMojibake(String(
         originalTracks[idx]?.instrument?.name || topLevelTracks[idx]?.instrument?.name ||
         fallbackInstruments[idx] || `Track ${idx + 1}`,
@@ -3397,8 +3388,9 @@ function extractPlayableTracks(jsonData, fallbackInstruments = [], song = null) 
         duration: Math.max(0.05, Number(n.duration || 0.2)),
         velocity: clamp01(Number(n.velocity || 0.7)),
         instrument,
+        trackId,
       }));
-      return { id: `support:${idx}`, instrument, notes };
+      return { id: trackId, instrument, notes };
     });
 }
 
@@ -3437,20 +3429,22 @@ function renderVisualizerLegend(songId) {
   const active = new Set(activeInstrumentsForSong(song, instruments));
   const duplicates = new Map();
   for (const entry of instruments) duplicates.set(entry.instrument, (duplicates.get(entry.instrument) || 0) + 1);
+  const seenNames = new Map();
   el.visualizerLegend.innerHTML = instruments
-    .map(({ id, instrument }, index) => {
-      const name = duplicates.get(instrument) > 1 ? `${instrument} ${index + 1}` : instrument;
+    .map(({ id, instrument }) => {
+      seenNames.set(instrument, (seenNames.get(instrument) || 0) + 1);
+      const name = duplicates.get(instrument) > 1 ? `${instrument} ${seenNames.get(instrument)}` : instrument;
       const on = active.has(id);
-      const custom = state.player.colorsBySong[song.id]?.[instrument];
-      const swatch = colorFromInstrument(instrument, false, song.id);
-      const pickerColor = custom || hslToHex(...defaultInstrumentHsl(instrument));
+      const custom = state.player.colorsBySong[song.id]?.[id] || state.player.colorsBySong[song.id]?.[instrument];
+      const swatch = colorFromInstrument(id, instrument, false, song.id);
+      const pickerColor = custom || hslToHex(...defaultInstrumentHsl(instrument, false, id));
       return `<div class="viz-legend-control">
         <button class="viz-legend-item${on ? " active" : " inactive"}" data-instrument-toggle="${escapeHtml(id)}" type="button" aria-pressed="${on}" title="${on ? "Disattiva" : "Attiva"} ${escapeHtml(name)}">
           <i style="background:${escapeHtml(swatch)}"></i>
           <span>${escapeHtml(name)}</span>
         </button>
-        <input class="viz-color-input" type="color" data-instrument-color="${escapeHtml(instrument)}" value="${pickerColor}" aria-label="Colore di ${escapeHtml(name)}" title="Cambia colore di ${escapeHtml(name)}" />
-        ${custom ? `<button class="viz-color-reset" type="button" data-instrument-color-reset="${escapeHtml(instrument)}" aria-label="Ripristina colore automatico di ${escapeHtml(name)}" title="Ripristina colore automatico">↺</button>` : ""}
+        <input class="viz-color-input" type="color" data-instrument-color="${escapeHtml(id)}" value="${pickerColor}" aria-label="Colore di ${escapeHtml(name)}" title="Cambia colore di ${escapeHtml(name)}" />
+        ${custom ? `<button class="viz-color-reset" type="button" data-instrument-color-reset="${escapeHtml(id)}" aria-label="Ripristina colore automatico di ${escapeHtml(name)}" title="Ripristina colore automatico">↺</button>` : ""}
       </div>`;
     })
     .join("");
@@ -3487,6 +3481,7 @@ async function loadSelectedSongForPlayer(forceReload = false) {
   const fallbackInstruments = instrumentsForSong(song);
   const trackGroups = extractPlayableTracks(jsonData, fallbackInstruments, song);
   const availableInstruments = trackGroups.map(({ id, instrument }) => ({ id, instrument }));
+  migrateInstrumentColors(song.id, availableInstruments);
   const activeInstruments = activeInstrumentsForSong(song, availableInstruments);
   const { notes, duration } = buildPlayableNotesFromTracks(trackGroups, activeInstruments);
 
@@ -3536,7 +3531,7 @@ function drawVisualizerFrame() {
   const activeColorByMidi = new Map();
   for (const n of visibleNotes) {
     if (n.time <= current && n.time + n.duration >= current && !activeColorByMidi.has(n.midi)) {
-      activeColorByMidi.set(n.midi, colorFromInstrument(n.instrument, false, state.player.loadedSongId));
+      activeColorByMidi.set(n.midi, colorFromInstrument(n.trackId || n.instrument, n.instrument, false, state.player.loadedSongId));
     }
   }
 
@@ -3555,7 +3550,7 @@ function drawVisualizerFrame() {
     if (y > canvas.height || y + h < 0) continue;
 
     const past = n.time + n.duration < current;
-    ctx.fillStyle = colorFromInstrument(n.instrument, past, state.player.loadedSongId);
+    ctx.fillStyle = colorFromInstrument(n.trackId || n.instrument, n.instrument, past, state.player.loadedSongId);
     ctx.fillRect(x, y, w, h);
   }
 
@@ -4477,12 +4472,12 @@ function bindEvents() {
     const input = event.target.closest("[data-instrument-color]");
     const song = getSongById(state.selectedSongId);
     if (!input || !song || !/^#[0-9a-f]{6}$/i.test(input.value)) return;
-    const instrument = input.dataset.instrumentColor;
+    const trackId = input.dataset.instrumentColor;
     const loaded = state.player.loadedSongId === song.id ? state.player.trackOptions : [];
-    const all = loaded.length ? loaded.map((entry) => entry.instrument) : instrumentsForSong(song);
-    if (!all.includes(instrument)) return;
+    const all = loaded.length ? loaded.map((entry) => entry.id) : instrumentsForSong(song);
+    if (!all.includes(trackId)) return;
     state.player.colorsBySong[song.id] ||= {};
-    state.player.colorsBySong[song.id][instrument] = input.value.toLowerCase();
+    state.player.colorsBySong[song.id][trackId] = input.value.toLowerCase();
     saveInstrumentColors();
     renderVisualizerLegend(song.id);
     drawVisualizerFrame();
@@ -4675,7 +4670,6 @@ function bindEvents() {
   el.exportFilteredJsonBtn.addEventListener("click", exportFilteredSongJson);
   el.exportVisualizerSelectionBtn.addEventListener("click", exportFilteredSongJson);
   el.exportVisualizerToPianoBtn.addEventListener("click", exportVisualizerSelectionToPiano);
-  el.createPianoReductionBtn.addEventListener("click", createPianoReduction);
   el.addToPlaylistBtn.addEventListener("click", addSelectedToPlaylist);
 
   el.renamePlaylistBtn.addEventListener("click", managePlaylist);

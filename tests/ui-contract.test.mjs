@@ -25,7 +25,6 @@ test("ui critical controls exist for key workflows", async () => {
     "libraryToolbar",
     "pianoLabPanel",
     "pianoEngineStatus",
-    "createPianoReductionBtn",
     "remoteCatalogPanel",
     "remoteCatalogSearch",
     "remoteConvertBtn",
@@ -82,9 +81,40 @@ test("visualizer instrument colors can be changed, reset and persisted per song"
   assert.match(app, /data-instrument-color=/);
   assert.match(app, /data-instrument-color-reset=/);
   assert.match(app, /pv_visualizer_colors_v1/);
-  assert.match(app, /colorsBySong\[song\.id\]\[instrument\] = input\.value/);
-  assert.match(app, /activeColorByMidi\.set\(n\.midi, colorFromInstrument\(n\.instrument, false, state\.player\.loadedSongId\)\)/);
-  assert.match(app, /ctx\.fillStyle = colorFromInstrument\(n\.instrument, past, state\.player\.loadedSongId\)/);
+  assert.match(app, /colorsBySong\[song\.id\]\[trackId\] = input\.value/);
+  assert.match(app, /activeColorByMidi\.set\(n\.midi, colorFromInstrument\(n\.trackId/);
+  assert.match(app, /ctx\.fillStyle = colorFromInstrument\(n\.trackId/);
+});
+
+test("same-named tracks keep independent colors and legacy colors migrate", async () => {
+  const app = await fs.readFile(path.join(root, "app.js"), "utf8");
+  const source = app.slice(app.indexOf("function defaultInstrumentHsl("), app.indexOf("function midiToName("));
+  const stored = new Map();
+  const state = { selectedSongId: "song-1", player: { colorsBySong: { "song-1": { "Acoustic Grand Piano": "#123456" } } } };
+  const { colorFromInstrument, migrateInstrumentColors, defaultInstrumentHsl } = new Function("state", "localStorage", "toast",
+    `${source}\nreturn { colorFromInstrument, migrateInstrumentColors, defaultInstrumentHsl };`)(
+    state, { setItem: (key, value) => stored.set(key, value) }, () => {},
+  );
+  const tracks = [
+    { id: "track:0", instrument: "Acoustic Grand Piano" },
+    { id: "track:1", instrument: "Acoustic Grand Piano" },
+  ];
+  assert.notEqual(defaultInstrumentHsl(tracks[0].instrument, false, tracks[0].id)[0],
+    defaultInstrumentHsl(tracks[1].instrument, false, tracks[1].id)[0]);
+  migrateInstrumentColors("song-1", tracks);
+  assert.equal(state.player.colorsBySong["song-1"]["Acoustic Grand Piano"], undefined);
+  assert.equal(state.player.colorsBySong["song-1"]["track:0"], "#123456");
+  assert.equal(state.player.colorsBySong["song-1"]["track:1"], "#123456");
+  state.player.colorsBySong["song-1"]["track:0"] = "#ff0000";
+  assert.equal(colorFromInstrument("track:0", tracks[0].instrument), "#ff0000");
+  assert.equal(colorFromInstrument("track:1", tracks[1].instrument), "#123456");
+  assert.ok(stored.has("pv_visualizer_colors_v1"));
+});
+
+test("detail view no longer contains the redundant piano reduction banner", async () => {
+  const html = await fs.readFile(indexPath, "utf8");
+  assert.doesNotMatch(html, /id="pianoReductionCta"/);
+  assert.match(html, /id="convertSelectedPianoBtn"/);
 });
 
 test("desktop JSON export refuses to write inside the live library JSON folder", async () => {
