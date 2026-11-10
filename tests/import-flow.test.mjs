@@ -487,6 +487,35 @@ test('import-json-archive skip duplicate keeps original', async () => {
   assert.equal(db.songs[0].title, 'Archive Song');
 });
 
+test('reattaching a legacy MIDI preserves edited metadata, playlists and practice progress', async () => {
+  const item = makeItem({ sourceFileName: 'original.mid', title: 'Nome dal file', artist: '', midiSeed: 'legacy' });
+  const first = await api('/api/library/import-batch', { method: 'POST', body: JSON.stringify({ items: [item] }) });
+  const id = first.songs[0].id;
+  const raw = JSON.parse(await fs.readFile(dbPath, 'utf8'));
+  Object.assign(raw.songs[0], { midiPath: '', title: 'Titolo scelto', artist: 'Artista scelto', composer: 'Compositore scelto', genre: 'Jazz', bpm: 97 });
+  raw.collections.push({ id: 'my-playlist', name: 'Mia playlist', type: 'playlist' });
+  raw.songCollection.push({ songId: id, collectionId: 'my-playlist' });
+  raw.tags.push({ id: 'my-tag', name: 'Studio' });
+  raw.songTags.push({ songId: id, tagId: 'my-tag' });
+  raw.practiceMeta[0].lastPracticePointSec = 42;
+  raw.practiceMeta[0].studyStatus = 'in_progress';
+  await fs.writeFile(dbPath, JSON.stringify(raw));
+  const restored = await api('/api/library/import-batch', { method: 'POST', body: JSON.stringify({ overwrite: true, items: [item] }) });
+  assert.equal(restored.overwrittenCount, 1);
+  const db = await api('/api/library');
+  const song = db.songs.find((entry) => entry.id === id);
+  assert.equal(song.title, 'Titolo scelto');
+  assert.equal(song.artist, 'Artista scelto');
+  assert.equal(song.composer, 'Compositore scelto');
+  assert.equal(song.genre, 'Jazz');
+  assert.equal(song.bpm, 97);
+  assert.equal(song.midiAvailable, true);
+  assert.ok(db.songCollection.some((entry) => entry.songId === id && entry.collectionId === 'my-playlist'));
+  assert.ok(db.songTags.some((entry) => entry.songId === id && entry.tagId === 'my-tag'));
+  assert.equal(db.practiceMeta.find((entry) => entry.songId === id).lastPracticePointSec, 42);
+  assert.equal(db.practiceMeta.find((entry) => entry.songId === id).studyStatus, 'in_progress');
+});
+
 test('JSON import keeps different arrangements with the same title and artist', async () => {
   const full = makeCompatiblePianoVisionJson();
   full.name = 'Same Song';

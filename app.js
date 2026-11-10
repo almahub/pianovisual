@@ -2253,8 +2253,9 @@ function askDuplicatePolicyWithModal(candidates) {
 }
 
 function detectDuplicateForItem({ fileHash, title, artist }, existingSongs, seenHashes, seenTitleArtist) {
-  const duplicateByHash = existingSongs.find((s) => s.fileHash === fileHash);
-  const duplicateByTitleArtist = existingSongs.find(
+  const originalSongs = existingSongs.filter((song) => !song.variantType);
+  const duplicateByHash = originalSongs.find((s) => s.fileHash === fileHash);
+  const duplicateByTitleArtist = originalSongs.find(
     (s) =>
       normalizeText(artist) &&
       normalizeText(s.title) === normalizeText(title) &&

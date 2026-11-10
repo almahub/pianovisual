@@ -1805,18 +1805,19 @@ async function handleApi(req, res, url) {
             skipped.push({ sourceFileName, reason: "Non è possibile sovrascrivere una versione derivata con un MIDI", existingSongId: targetSong.id });
             continue;
           }
+          const preserveLegacyMetadata = !targetSong.midiAvailable;
 
           const targetJsonAbs = songJsonAbsolutePath(targetSong, `${hashPrefix}-${targetSong.id}.json`);
           const midiPath = await storeMidi(midiBuffer, targetSong.id, hash);
           await writeJsonAtomic(targetJsonAbs, jsonData);
 
-          targetSong.title = repairMojibake(songMeta.title || "Senza titolo");
-          targetSong.artist = repairMojibake(songMeta.artist || "");
-          targetSong.composer = repairMojibake(songMeta.composer || "");
-          targetSong.genre = repairMojibake(songMeta.genre || "");
-          targetSong.difficulty = songMeta.difficulty || targetSong.difficulty || "intermedio";
-          targetSong.key = songMeta.key || targetSong.key || "C major";
-          targetSong.bpm = Number(songMeta.bpm || targetSong.bpm || 120);
+          targetSong.title = repairMojibake((preserveLegacyMetadata && targetSong.title) || songMeta.title || "Senza titolo");
+          targetSong.artist = repairMojibake((preserveLegacyMetadata && targetSong.artist) || songMeta.artist || "");
+          targetSong.composer = repairMojibake((preserveLegacyMetadata && targetSong.composer) || songMeta.composer || "");
+          targetSong.genre = repairMojibake((preserveLegacyMetadata && targetSong.genre) || songMeta.genre || "");
+          targetSong.difficulty = (preserveLegacyMetadata && targetSong.difficulty) || songMeta.difficulty || targetSong.difficulty || "intermedio";
+          targetSong.key = (preserveLegacyMetadata && targetSong.key) || songMeta.key || targetSong.key || "C major";
+          targetSong.bpm = Number((preserveLegacyMetadata && targetSong.bpm) || songMeta.bpm || targetSong.bpm || 120);
           targetSong.duration = Number(songMeta.duration || targetSong.duration || 0);
           targetSong.instruments = Array.isArray(songMeta.instruments) ? songMeta.instruments : targetSong.instruments || [];
           targetSong.updatedAt = nowIso();
@@ -1831,13 +1832,14 @@ async function handleApi(req, res, url) {
             practice = { songId: targetSong.id, lastPracticePointSec: 0, playbackSpeed: 1, favoriteLoops: [], studyStatus: "to_study" };
             db.practiceMeta.push(practice);
           }
-          if (Object.hasOwn(songMeta, "lastPracticePointSec")) practice.lastPracticePointSec = Number(songMeta.lastPracticePointSec || 0);
-          if (Object.hasOwn(songMeta, "playbackSpeed")) practice.playbackSpeed = Number(songMeta.playbackSpeed || 1);
-          if (Array.isArray(songMeta.favoriteLoops)) practice.favoriteLoops = songMeta.favoriteLoops;
-          if (Object.hasOwn(songMeta, "studyStatus")) practice.studyStatus = songMeta.studyStatus || "to_study";
-
-          applySongTags(targetSong.id, songMeta.tags, true);
-          applySongCollections(targetSong.id, songMeta.collectionIds, typeof songMeta.favorite === "boolean" ? songMeta.favorite : undefined);
+          if (!preserveLegacyMetadata) {
+            if (Object.hasOwn(songMeta, "lastPracticePointSec")) practice.lastPracticePointSec = Number(songMeta.lastPracticePointSec || 0);
+            if (Object.hasOwn(songMeta, "playbackSpeed")) practice.playbackSpeed = Number(songMeta.playbackSpeed || 1);
+            if (Array.isArray(songMeta.favoriteLoops)) practice.favoriteLoops = songMeta.favoriteLoops;
+            if (Object.hasOwn(songMeta, "studyStatus")) practice.studyStatus = songMeta.studyStatus || "to_study";
+            applySongTags(targetSong.id, songMeta.tags, true);
+            applySongCollections(targetSong.id, songMeta.collectionIds, typeof songMeta.favorite === "boolean" ? songMeta.favorite : undefined);
+          }
           applySmartMembership(db, targetSong);
 
           imported.push(targetSong);

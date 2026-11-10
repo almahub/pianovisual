@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+## [1.0.35] - 2026-11-10
+### Fixed
+- Ricollegando un MIDI a un vecchio brano sono conservati metadati, playlist, tag e progressi di studio.
+- Il controllo dei MIDI duplicati esclude le versioni derivate di Piano Lab.
+
 ## [1.0.34] - 2026-11-10
 ### Added
 - Conservazione dei MIDI originali e download dalla libreria, con versioni indipendenti per strumenti selezionati in Piano Lab.
