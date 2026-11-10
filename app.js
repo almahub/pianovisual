@@ -1726,7 +1726,7 @@ function renderViewLabels() {
   const map = {
     home: ["Home", "Dashboard Studio"],
     library: ["Libreria", "MIDI originali"],
-    legacyJson: ["Libreria", "Brani JSON"],
+    legacyJson: ["Libreria", "Archivio JSON precedente"],
     import: ["Import", "Importa MIDI"],
     favorites: ["Preferiti", "Brani Preferiti"],
     playlists: ["Playlist", "Le Tue Playlist"],

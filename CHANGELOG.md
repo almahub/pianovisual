@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+## [1.0.36] - 2026-11-10
+### Changed
+- Artisti, Generi, Preferiti e Playlist sono raccolti in un sottomenu richiudibile della libreria.
+- L'archivio JSON precedente e accessibile da File e backup, lasciando in primo piano MIDI e Piano Lab.
+
 ## [1.0.35] - 2026-11-10
 ### Fixed
 - Ricollegando un MIDI a un vecchio brano sono conservati metadati, playlist, tag e progressi di studio.

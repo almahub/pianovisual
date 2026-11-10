@@ -560,6 +560,30 @@ textarea {
   min-width: 0;
 }
 
+.nav-submenu > summary {
+  padding: 8px 10px;
+  color: var(--spotify-soft);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.nav-submenu-items {
+  display: grid;
+  gap: 2px;
+  margin-left: 14px;
+  padding-left: 8px;
+  border-left: 1px solid #3a3a3a;
+}
+
+.nav-submenu-items .nav-item {
+  padding-block: 7px;
+}
+
+.archive-nav-item {
+  width: 100%;
+}
+
 .detail-panel {
   position: sticky;
   top: 12px;
