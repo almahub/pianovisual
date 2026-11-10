@@ -92,18 +92,23 @@ Output in `dist/` (installer NSIS).
 
 ### Sincronizzazione Quest 3 via ADB (desktop)
 - Installa Android SDK Platform Tools e assicurati che `adb` sia disponibile nel `PATH`.
-- Abilita la modalita sviluppatore/debug USB sul Quest e autorizza il computer nel visore.
+- Nell'app Meta Horizon abbina il Quest e attiva la modalita sviluppatore. Se necessario, completa prima la registrazione e la verifica previste da Meta; consulta la [guida ufficiale](https://developers.meta.com/vr/documentation/native/android/mobile-device-setup/).
+- Collega il Quest acceso con un cavo dati, indossalo e autorizza il debug USB per il computer. Su Windows potrebbero servire i driver ADB indicati nella guida Meta.
 - Vedere `Quest 3` in Esplora file indica solo il collegamento MTP: per i pulsanti di sincronizzazione serve anche che `adb devices` mostri il dispositivo come `device` (non `unauthorized` o `offline`).
+- Se la lista e vuota, controlla cavo, modalita sviluppatore e driver. Se indica `unauthorized`, accetta la richiesta nel visore e riprova.
 - Usa `Rileva Quest 3`, quindi scegli `Importa JSON dal Quest` oppure `Invia JSON al Quest`.
 - Prima dell'invio PianoVisual confronta gli hash e mostra nuovi, modificati e gia uguali.
-- La sincronizzazione non elimina mai automaticamente file dal Quest.
+- Dopo la conferma vengono inviati tutti i JSON nuovi o modificati rilevati: i file omonimi modificati sul Quest vengono sovrascritti. Prima dell'invio conserva una copia dei JSON che vuoi mantenere.
+- La sincronizzazione non elimina automaticamente file dal Quest. Non cancellare le cartelle dell'app o i file di database per ripulire i brani personali.
 
 ## Struttura progetto
 - `app.js`: logica frontend (import, UI, visualizer)
+- `compatibility.js`: controlli indicativi sui JSON
 - `server.js`: API locale e persistenza
 - `library/db.json`: database runtime locale (non versionato)
 - `library/db.example.json`: template base versionato
 - `library/json/`: JSON convertiti (dati locali, non versionati)
+- `library/midi/`, `library/jsonpiano/`, `library/jsonselected/`: MIDI originali e versioni derivate locali
 - `tests/`: test automatici flusso import
 - `samples/json/`: esempi JSON "safe"
 
