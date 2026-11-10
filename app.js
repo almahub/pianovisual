@@ -1,6 +1,7 @@
 import { Midi } from "https://cdn.jsdelivr.net/npm/@tonejs/midi@2.0.28/+esm";
 import * as Tone from "https://cdn.jsdelivr.net/npm/tone@15.1.22/+esm";
 import JSZip from "https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm";
+import { inspectPianoVisionJson } from "./compatibility.js";
 
 const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
@@ -126,11 +127,14 @@ const el = {
   detailTitle: document.getElementById("detailTitle"),
   detailSubtitle: document.getElementById("detailSubtitle"),
   detailMeta: document.getElementById("detailMeta"),
+  inspectCompatibilityBtn: document.getElementById("inspectCompatibilityBtn"),
+  compatibilityResult: document.getElementById("compatibilityResult"),
 
   editTitle: document.getElementById("editTitle"),
   editArtist: document.getElementById("editArtist"),
   editComposer: document.getElementById("editComposer"),
   editGenre: document.getElementById("editGenre"),
+  editImageUrl: document.getElementById("editImageUrl"),
   editDifficulty: document.getElementById("editDifficulty"),
   editKey: document.getElementById("editKey"),
   editBpm: document.getElementById("editBpm"),
@@ -987,7 +991,7 @@ function splitHands(tracks) {
   return { leftTrack: sorted[0], rightTrack: sorted[sorted.length - 1], splitSingle: false };
 }
 
-function buildMeasureEntry({ measure, measureIndex, notes, handPrefix, direction, ppq, idStart }) {
+function buildMeasureEntry({ measure, measureIndex, notes, handPrefix, direction, ppq, idStart, tempos }) {
   const mappedNotes = notes
     .sort((a, b) => (a.ticks || 0) - (b.ticks || 0))
     .map((note, idx) => {
@@ -1024,7 +1028,7 @@ function buildMeasureEntry({ measure, measureIndex, notes, handPrefix, direction
   return {
     direction,
     time: round(measure.time, 12),
-    timeEnd: round(measure.time + (measure.totalTicks / ppq) * 0.5, 12),
+    timeEnd: ticksToSeconds(measure.ticksStart + measure.totalTicks, tempos, ppq),
     timeSignature: measure.timeSignature,
     notes: mappedNotes,
     max,
@@ -1036,7 +1040,7 @@ function buildMeasureEntry({ measure, measureIndex, notes, handPrefix, direction
   };
 }
 
-function buildTracksV2(tracks, measures, ppq) {
+function buildTracksV2(tracks, measures, ppq, tempos = [{ ticks: 0, bpm: 120 }]) {
   const { rightTrack, leftTrack, splitSingle } = splitHands(tracks);
   const right = [];
   const left = [];
@@ -1072,6 +1076,7 @@ function buildTracksV2(tracks, measures, ppq) {
         direction: "up",
         ppq,
         idStart: rightId,
+        tempos,
       }),
     );
 
@@ -1084,6 +1089,7 @@ function buildTracksV2(tracks, measures, ppq) {
         direction: "down",
         ppq,
         idStart: leftId,
+        tempos,
       }),
     );
 
@@ -1170,9 +1176,12 @@ function buildOutput(midi, meta) {
     }));
 
   const measures = buildMeasures(header, tracks);
-  const tracksV2 = buildTracksV2(tracks, measures, ppq);
-
   const tempos = normalizeTempos(header);
+  const tracksV2 = buildTracksV2(tracks, measures, ppq, tempos);
+  const timeSignatures = [...(header.timeSignatures || [])].sort((a, b) => a.ticks - b.ticks);
+  if (!timeSignatures.length || timeSignatures[0].ticks !== 0) {
+    timeSignatures.unshift({ ticks: 0, timeSignature: [4, 4], measures: 0 });
+  }
   const maxEnd = tracks.reduce((mx, t) => {
     const tEnd = (t.notes || []).reduce((nmx, n) => Math.max(nmx, (n.time || 0) + (n.duration || 0)), 0);
     return Math.max(mx, tEnd);
@@ -1181,7 +1190,7 @@ function buildOutput(midi, meta) {
   return {
     supportingTracks,
     start_time: 0,
-    song_length: Math.floor(maxEnd),
+    song_length: round(maxEnd, 12),
     resolution: ppq,
     tempos: tempos.map((t) => ({
       bpm: t.bpm,
@@ -1189,7 +1198,7 @@ function buildOutput(midi, meta) {
       time: round(t.time || ticksToSeconds(t.ticks, tempos, ppq), 12),
     })),
     keySignatures: (header.keySignatures || []).map((k) => ({ key: k.key, scale: k.scale, ticks: k.ticks })),
-    timeSignatures: (header.timeSignatures || []).map((t) => ({
+    timeSignatures: timeSignatures.map((t) => ({
       ticks: t.ticks,
       timeSignature: t.timeSignature,
       measures: t.measures ?? 0,
@@ -1435,12 +1444,17 @@ function renderTable() {
       const pianoVariant = song.variantType === "piano_reduction";
       const titleKey = `${normalizeText(song.title)}\0${normalizeText(song.artist)}`;
       const sourceLabel = song.versionName || (titleCounts.get(titleKey) > 1 ? song.sourceFileName || song.jsonPath || "" : "");
+      let imageUrl = "";
+      try {
+        const candidate = new URL(song.imageUrl || "");
+        if (candidate.protocol === "https:" && !candidate.username && !candidate.password) imageUrl = candidate.href;
+      } catch { /* The letter remains visible when no valid cover is set. */ }
       return `
         <tr data-song-id="${song.id}" class="${active}${pianoVariant ? " piano-row" : ""}">
           <td><input type="checkbox" data-row-action="select" data-song-id="${song.id}" ${checked} /></td>
           <td>
             <div class="song-cell">
-              <div class="cover">${escapeHtml(avatar)}</div>
+              <div class="cover">${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="" data-fallback="${escapeHtml(avatar)}" loading="lazy" />` : escapeHtml(avatar)}</div>
               <div>
                 <strong>${escapeHtml(song.title || "Senza titolo")}</strong><br />
                 <small>${pianoVariant ? '<span class="piano-table-badge">Piano</span>' : isFavorite(song.id) ? "★ Preferito" : ""}</small>
@@ -1465,6 +1479,9 @@ function renderTable() {
       `;
     })
     .join("");
+  for (const image of el.songsTableBody.querySelectorAll(".cover img")) {
+    image.addEventListener("error", () => { image.parentElement.textContent = image.dataset.fallback || "?"; }, { once: true });
+  }
 
   if (el.selectAllPageCheckbox) {
     const allSelected = rows.length > 0 && rows.every((s) => state.selectedSongIds.has(s.id));
@@ -1848,6 +1865,7 @@ function renderDetail() {
   el.editArtist.value = song.artist || "";
   el.editComposer.value = song.composer || "";
   el.editGenre.value = song.genre || "";
+  el.editImageUrl.value = song.imageUrl || "";
   el.editDifficulty.value = song.difficulty || "intermedio";
   el.editKey.value = song.key || "";
   el.editBpm.value = Number(song.bpm || 120);
@@ -2872,6 +2890,7 @@ function filterJsonByActiveInstruments(jsonData, song, activeInstruments, includ
       originalTracks.length ? clone.original.tracks : clone.tracks,
       clone.measures,
       Number(clone.resolution || 480),
+      Array.isArray(clone.tempos) && clone.tempos.length ? clone.tempos : [{ ticks: 0, bpm: 120 }],
     );
   } else if (clone.tracksV2 && typeof clone.tracksV2 === "object") {
     clone.tracksV2 = { right: [], left: [] };
@@ -3035,6 +3054,7 @@ async function saveMetadata() {
     artist: el.editArtist.value.trim(),
     composer: el.editComposer.value.trim(),
     genre: el.editGenre.value.trim(),
+    imageUrl: el.editImageUrl.value.trim(),
     difficulty: el.editDifficulty.value,
     key: el.editKey.value.trim(),
     bpm: Number(el.editBpm.value || 0),
@@ -3288,6 +3308,23 @@ async function renamePlaylist() {
   }
 
   await renamePlaylistById(current.id, el.toolPlaylistName?.value || "");
+}
+
+async function inspectSelectedCompatibility() {
+  const song = getSongById(state.selectedSongId);
+  if (!song) return;
+  el.inspectCompatibilityBtn.disabled = true;
+  try {
+    const response = await fetch(song.jsonPath);
+    if (!response.ok) throw new Error("JSON del brano non disponibile");
+    const result = inspectPianoVisionJson(await response.json());
+    if (state.selectedSongId !== song.id) return;
+    const summary = `${result.trackCount} tracce di accompagnamento, ${result.measureCount} misure.`;
+    el.compatibilityResult.textContent = result.issues.length
+      ? `${summary} Da verificare: ${result.issues.join(" ")}`
+      : `${summary} Nessuna anomalia rilevata nei controlli disponibili.`;
+  } catch (error) { el.compatibilityResult.textContent = error.message; }
+  finally { el.inspectCompatibilityBtn.disabled = false; }
 }
 
 async function renamePlaylistById(playlistId, requestedName) {
@@ -3845,6 +3882,7 @@ async function onTableClick(event) {
   const tr = event.target.closest("tr[data-song-id]");
   if (!tr) return;
   state.selectedSongId = tr.dataset.songId;
+  el.compatibilityResult.textContent = "";
   state.player.loadedSongId = "";
   state.player.notes = [];
   state.player.trackOptions = [];
@@ -4732,6 +4770,7 @@ function bindEvents() {
   el.themeDarkBtn.addEventListener("click", () => applyTheme("dark"));
 
   el.saveMetadataBtn.addEventListener("click", saveMetadata);
+  el.inspectCompatibilityBtn.addEventListener("click", inspectSelectedCompatibility);
   el.deleteSongBtn.addEventListener("click", deleteSongSelected);
   el.toggleFavoriteBtn.addEventListener("click", toggleFavoriteSelected);
   el.exportFilteredJsonBtn.addEventListener("click", exportFilteredSongJson);

@@ -1159,6 +1159,13 @@ tbody tr.active {
   gap: 8px;
 }
 
+.cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
 .playlist-section-head,
 .playlist-card-actions {
   display: flex;

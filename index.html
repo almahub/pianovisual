@@ -463,6 +463,11 @@
                 <p id="detailTitle" class="detail-title"></p>
                 <p id="detailSubtitle" class="detail-subtitle"></p>
                 <ul id="detailMeta" class="detail-meta"></ul>
+                <details>
+                  <summary>Controllo compatibilita JSON</summary>
+                  <button id="inspectCompatibilityBtn" class="btn subtle" type="button">Controlla brano</button>
+                  <p id="compatibilityResult" class="mini-note" aria-live="polite"></p>
+                </details>
                 <details open>
                   <summary>Visualizer</summary>
                   <canvas id="visualizerCanvas" width="520" height="220"></canvas>
@@ -488,6 +493,7 @@
                         <label>Artista <input id="editArtist" type="text" /></label>
                         <label>Compositore <input id="editComposer" type="text" /></label>
                         <label>Genere <input id="editGenre" type="text" /></label>
+                        <label>URL copertina (HTTPS) <input id="editImageUrl" type="url" placeholder="https://..." /></label>
                       </div>
                     </section>
 

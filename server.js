@@ -537,6 +537,14 @@ function songById(db, id) {
   return db.songs.find((s) => s.id === id);
 }
 
+function safeImageUrl(value) {
+  if (typeof value !== "string" || value.length > 2048) return "";
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === "https:" && !url.username && !url.password ? url.href : "";
+  } catch { return ""; }
+}
+
 function applySongPatch(song, patch) {
   if (Object.hasOwn(patch, "activeInstruments")) {
     song.activeInstruments = [...new Set(patch.activeInstruments)];
@@ -546,6 +554,7 @@ function applySongPatch(song, patch) {
     "artist",
     "composer",
     "genre",
+    "imageUrl",
     "difficulty",
     "key",
     "bpm",
@@ -560,7 +569,9 @@ function applySongPatch(song, patch) {
 
   for (const key of allowed) {
     if (Object.hasOwn(patch, key)) {
-      if (["title", "artist", "composer", "genre"].includes(key)) {
+      if (key === "imageUrl") {
+        song[key] = safeImageUrl(patch[key]);
+      } else if (["title", "artist", "composer", "genre"].includes(key)) {
         song[key] = repairMojibake(String(patch[key] || ""));
       } else {
         song[key] = patch[key];
@@ -605,6 +616,7 @@ function inferSongMetadataFromJson(jsonData, fileName) {
     artist: repairMojibake(String(jsonData?.artist || "")) || inferArtist({ title: jsonData?.name, fileName }),
     composer: repairMojibake(String(jsonData?.composer || "")),
     genre: repairMojibake(String(jsonData?.genre || "")),
+    imageUrl: safeImageUrl(jsonData?.imageUrl),
     difficulty: String(jsonData?.difficulty || "intermedio"),
     key: keySigs[0] ? `${keySigs[0].key || "C"} ${keySigs[0].scale || "major"}` : "C major",
     bpm: Number(tempos[0]?.bpm || 120),
@@ -951,6 +963,7 @@ async function handleApi(req, res, url) {
     const hash = hashJsonData(data);
     const song = {
       id, title: source.title, artist: source.artist, composer: source.composer,
+      imageUrl: safeImageUrl(source.imageUrl),
       genre: source.genre, difficulty: source.difficulty, key: source.key, bpm: source.bpm,
       duration: Number(data.song_length || 0), instruments: Array.isArray(payload.instruments) ? payload.instruments.slice(0, 128).map(String) : [],
       importedAt: nowIso(), updatedAt: nowIso(), fileHash: hash, jsonContentHash: hash,
@@ -1063,6 +1076,7 @@ async function handleApi(req, res, url) {
         artist: sourceSong.artist || "",
         composer: sourceSong.composer || "",
         genre: sourceSong.genre || "",
+        imageUrl: safeImageUrl(sourceSong.imageUrl),
         difficulty: sourceSong.difficulty || "intermedio",
         key: sourceSong.key || "",
         bpm: Number(sourceSong.bpm || 120),
@@ -1577,6 +1591,7 @@ async function handleApi(req, res, url) {
         existing.jsonContentHash = hash;
         existing.sourceFileName = existing.sourceFileName || fileName;
         existing.jsonPath = existing.jsonPath || relPath;
+        if (!existing.imageUrl && meta.imageUrl) existing.imageUrl = meta.imageUrl;
         if (variantType) existing.variantType = variantType;
 
         if (updateExisting) {
@@ -1944,6 +1959,10 @@ async function handleApi(req, res, url) {
     }
 
     const activeInstruments = payload.song?.activeInstruments;
+    if (Object.hasOwn(payload.song || {}, "imageUrl") && payload.song.imageUrl !== "" && !safeImageUrl(payload.song.imageUrl)) {
+      sendJson(res, 400, { error: "Indirizzo immagine non valido: usa un URL HTTPS" });
+      return true;
+    }
     if (Object.hasOwn(payload.song || {}, "activeInstruments") &&
         (!Array.isArray(activeInstruments) || activeInstruments.length > 128 ||
           activeInstruments.some((name) => typeof name !== "string" || !name.trim() || name.length > 160))) {

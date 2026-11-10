@@ -1,6 +1,6 @@
 {
   "name": "pianovisual",
-  "version": "1.0.36",
+  "version": "1.0.37",
   "private": false,
   "type": "module",
   "main": "electron/main.cjs",
@@ -30,6 +30,7 @@
     },
     "files": [
       "app.js",
+      "compatibility.js",
       "artist-inference.js",
       "index.html",
       "style.css",

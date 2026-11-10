@@ -516,6 +516,19 @@ test('reattaching a legacy MIDI preserves edited metadata, playlists and practic
   assert.equal(db.practiceMeta.find((entry) => entry.songId === id).studyStatus, 'in_progress');
 });
 
+test('cover URL stays in application metadata and follows derived versions', async () => {
+  const item = makeItem({ title: 'Copertina', artist: 'Artista' });
+  const original = (await api('/api/library/import-batch', { method: 'POST', body: JSON.stringify({ items: [item] }) })).songs[0];
+  const originalPath = path.join(jsonDir, path.basename(original.jsonPath));
+  const before = await fs.readFile(originalPath);
+  await api(`/api/songs/${original.id}`, { method: 'PUT', body: JSON.stringify({ song: { imageUrl: 'https://example.org/cover.png' } }) });
+  const version = (await api('/api/selected-versions/create', { method: 'POST', body: JSON.stringify({ songId: original.id, versionName: 'Piano', jsonData: item.jsonData }) })).song;
+  assert.equal(version.imageUrl, 'https://example.org/cover.png');
+  assert.deepEqual(await fs.readFile(originalPath), before);
+  assert.equal(JSON.parse(await fs.readFile(path.join(libraryDir, 'jsonselected', path.basename(version.jsonPath)))).imageUrl, undefined);
+  await assert.rejects(api(`/api/songs/${original.id}`, { method: 'PUT', body: JSON.stringify({ song: { imageUrl: 'javascript:alert(1)' } }) }), /400/);
+});
+
 test('JSON import keeps different arrangements with the same title and artist', async () => {
   const full = makeCompatiblePianoVisionJson();
   full.name = 'Same Song';

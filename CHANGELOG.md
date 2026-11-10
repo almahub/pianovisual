@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+## [1.0.37] - 2026-11-10
+### Added
+- Controllo indicativo del JSON e copertina per brano mediante URL HTTPS, conservata nei metadati locali.
+
+### Fixed
+- Fine delle misure coerente con la mappa dei tempi, anche quando il BPM cambia.
+- Metrica 4/4 iniziale quando manca nel MIDI e durata delle note conservata al di sotto del secondo.
+
 ## [1.0.36] - 2026-11-10
 ### Changed
 - Artisti, Generi, Preferiti e Playlist sono raccolti in un sottomenu richiudibile della libreria.

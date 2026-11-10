@@ -240,6 +240,11 @@ test("MIDI conversion maps each supporting track to its instrument number", asyn
   const json = buildOutput({ header: { ppq: 480 }, tracks: [track(0, 60), track(40, 64), track(73, 67)] }, {});
   assert.deepEqual(json.supportingTracks.map((item) => item.theirInstrument), [0, 40, 73]);
   assert.equal(json.supportingTracks[1].notes[0].midi, 64);
+  assert.deepEqual(json.timeSignatures[0].timeSignature, [4, 4]);
+  const fractional = buildOutput({ header: { ppq: 480 }, tracks: [{ instrument: { number: 0 }, notes: [{ midi: 60, time: 0, duration: 0.75 }] }] }, {});
+  assert.equal(fractional.song_length, 0.75);
+  const later = buildOutput({ header: { ppq: 480, timeSignatures: [{ ticks: 1920, timeSignature: [3, 4] }] }, tracks: [track(0, 60)] }, {});
+  assert.deepEqual(later.timeSignatures.map((signature) => signature.timeSignature), [[4, 4], [3, 4]]);
 });
 
 test("artist cards load a matching online thumbnail without storing it in song JSON", async () => {
