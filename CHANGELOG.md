@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+## [1.0.34] - 2026-11-10
+### Added
+- Conservazione dei MIDI originali e download dalla libreria, con versioni indipendenti per strumenti selezionati in Piano Lab.
+- Conservazione delle versioni derivate quando la sorgente viene eliminata e indicazione dell'originale mancante.
+
+### Changed
+- I JSON precedenti senza MIDI conservato restano disponibili in Brani JSON; il backup completo include MIDI e versioni.
+
 ## [1.0.33] - 2026-10-13
 ### Fixed
 - Colori del Visualizer distinti e persistenti per singola traccia, anche quando piu parti hanno lo stesso nome di strumento. Le vecchie preferenze sono migrate.

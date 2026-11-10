@@ -150,6 +150,10 @@ const el = {
   visualizerCanvas: document.getElementById("visualizerCanvas"),
   visualizerLegend: document.getElementById("visualizerLegend"),
   exportVisualizerSelectionBtn: document.getElementById("exportVisualizerSelectionBtn"),
+  saveSelectedVersionBtn: document.getElementById("saveSelectedVersionBtn"),
+  selectedVersionName: document.getElementById("selectedVersionName"),
+  selectedVersionNameLabel: document.getElementById("selectedVersionNameLabel"),
+  downloadOriginalMidiBtn: document.getElementById("downloadOriginalMidiBtn"),
   exportVisualizerToPianoBtn: document.getElementById("exportVisualizerToPianoBtn"),
   footerTrackTitle: document.getElementById("footerTrackTitle"),
   footerTrackArtist: document.getElementById("footerTrackArtist"),
@@ -1285,7 +1289,7 @@ function updateKeyFilterOptions() {
 }
 
 function filteredSongs() {
-  const isLibraryView = state.view === "library" || state.view === "reductions";
+  const isLibraryView = ["library", "legacyJson", "reductions", "selectedVersions"].includes(state.view);
   const q = isLibraryView ? el.searchInput.value.trim().toLowerCase() : "";
   const bpmFilter = isLibraryView ? el.bpmFilter.value : "";
   const keyFilter = isLibraryView ? el.keyFilter.value : "";
@@ -1294,7 +1298,10 @@ function filteredSongs() {
 
   let list = [...(state.db?.songs || [])];
   if (state.view === "reductions") list = list.filter((song) => song.variantType === "piano_reduction");
-  else list = list.filter((song) => song.variantType !== "piano_reduction");
+  else if (state.view === "selectedVersions") list = list.filter((song) => song.variantType === "selected_instruments");
+  else list = list.filter((song) => !["piano_reduction", "selected_instruments"].includes(song.variantType));
+  if (state.view === "library") list = list.filter((song) => song.midiAvailable);
+  if (state.view === "legacyJson") list = list.filter((song) => !song.midiAvailable);
 
   if (state.view === "favorites") list = list.filter((s) => isFavorite(s.id));
   if (state.view === "genres") {
@@ -1338,7 +1345,7 @@ function filteredSongs() {
 
   if (q) {
     list = list.filter((song) => {
-      const hay = [song.title, song.artist, song.composer, song.genre, song.key, song.difficulty, ...tagsForSong(song.id)]
+      const hay = [song.title, song.versionName, song.artist, song.composer, song.genre, song.key, song.difficulty, ...tagsForSong(song.id)]
         .join(" ")
         .toLowerCase();
       return hay.includes(q);
@@ -1427,7 +1434,7 @@ function renderTable() {
           : `<button class="icon-btn" data-row-action="playlist" data-song-id="${song.id}" title="Aggiungi playlist">＋</button>`;
       const pianoVariant = song.variantType === "piano_reduction";
       const titleKey = `${normalizeText(song.title)}\0${normalizeText(song.artist)}`;
-      const sourceLabel = titleCounts.get(titleKey) > 1 ? song.sourceFileName || song.jsonPath || "" : "";
+      const sourceLabel = song.versionName || (titleCounts.get(titleKey) > 1 ? song.sourceFileName || song.jsonPath || "" : "");
       return `
         <tr data-song-id="${song.id}" class="${active}${pianoVariant ? " piano-row" : ""}">
           <td><input type="checkbox" data-row-action="select" data-song-id="${song.id}" ${checked} /></td>
@@ -1467,7 +1474,7 @@ function renderTable() {
 
 function renderDirectoryPanel() {
   const allSongs = state.db?.songs || [];
-  const songs = allSongs.filter((song) => song.variantType !== "piano_reduction");
+  const songs = allSongs.filter((song) => !["piano_reduction", "selected_instruments"].includes(song.variantType));
   const reductionCount = allSongs.filter((song) => song.variantType === "piano_reduction").length;
   const manual = (state.db?.collections || []).filter((c) => c.type === "playlist" && !c.smartRule);
   el.playlistsCards.classList.toggle("home-dashboard", state.view === "home");
@@ -1698,7 +1705,7 @@ async function renderArtistPhotos() {
 
 function shouldShowTable() {
   if (state.view === "home" || state.view === "import") return false;
-  if (state.view === "library" || state.view === "reductions") return true;
+  if (["library", "legacyJson", "reductions", "selectedVersions"].includes(state.view)) return true;
   if (state.view === "playlists") return Boolean(state.selectedPlaylistId);
   if (state.view === "genres") return Boolean(state.selectedGenre);
   if (state.view === "artists") return Boolean(state.selectedArtist);
@@ -1718,7 +1725,8 @@ function renderSmartPlaylists() {
 function renderViewLabels() {
   const map = {
     home: ["Home", "Dashboard Studio"],
-    library: ["Libreria", "Archivio Brani"],
+    library: ["Libreria", "MIDI originali"],
+    legacyJson: ["Libreria", "Brani JSON"],
     import: ["Import", "Importa MIDI"],
     favorites: ["Preferiti", "Brani Preferiti"],
     playlists: ["Playlist", "Le Tue Playlist"],
@@ -1726,6 +1734,7 @@ function renderViewLabels() {
     artists: ["Artisti", "Catalogo Artisti"],
     remote: ["Catalogo remoto", "Artisti e brani MIDI"],
     reductions: ["Piano Lab", "Riduzioni pianistiche"],
+    selectedVersions: ["Piano Lab", "Strumenti selezionati"],
   };
   const [k, t] = map[state.view] || map.home;
   el.viewKicker.textContent = k;
@@ -1748,16 +1757,16 @@ function renderViewLabels() {
   el.playlistCreateBtn.classList.toggle("hidden", state.view !== "playlists");
   el.playlistCreateForm.classList.add("hidden");
   el.smartPlaylistsSection.classList.toggle("hidden", state.view !== "home");
-  const libraryOnly = state.view === "library" || state.view === "reductions";
+  const libraryOnly = ["library", "legacyJson", "reductions", "selectedVersions"].includes(state.view);
   el.libraryToolbar?.classList.toggle("hidden", !libraryOnly);
-  el.convertSelectedPianoBtn?.classList.toggle("hidden", state.view !== "library");
-  el.exportSelectedFilteredBtn?.classList.toggle("hidden", state.view !== "library");
+  el.convertSelectedPianoBtn?.classList.toggle("hidden", !["library", "legacyJson"].includes(state.view));
+  el.exportSelectedFilteredBtn?.classList.toggle("hidden", !["library", "legacyJson"].includes(state.view));
   el.searchWrap.classList.toggle("hidden", !libraryOnly);
   el.filterPanel.classList.toggle("hidden", !libraryOnly);
   el.detailPanel.classList.toggle("hidden", !libraryOnly);
   el.contentGrid.classList.toggle("single-column", !libraryOnly);
-  el.contentGrid.classList.toggle("piano-workspace", state.view === "reductions");
-  document.documentElement.dataset.workspace = state.view === "reductions" ? "piano" : "library";
+  el.contentGrid.classList.toggle("piano-workspace", ["reductions", "selectedVersions"].includes(state.view));
+  document.documentElement.dataset.workspace = ["reductions", "selectedVersions"].includes(state.view) ? "piano" : "library";
   const showTable = shouldShowTable();
   el.tableWrap.classList.toggle("hidden", !showTable);
   el.paginationWrap.classList.toggle("hidden", !showTable);
@@ -1803,13 +1812,18 @@ function renderDetail() {
 
   el.detailTitle.textContent = song.title || "Senza titolo";
   el.detailSubtitle.textContent = `${song.artist || "Artista sconosciuto"} · ${song.composer || "Compositore n/d"}`;
+  el.saveSelectedVersionBtn.classList.toggle("hidden", Boolean(song.variantType));
+  el.selectedVersionNameLabel.classList.toggle("hidden", Boolean(song.variantType));
+  el.saveSelectedVersionBtn.disabled = activeCount === 0;
+  el.downloadOriginalMidiBtn.classList.toggle("hidden", Boolean(song.variantType));
+  el.downloadOriginalMidiBtn.disabled = !song.midiAvailable;
   if (el.exportVisualizerSelectionBtn) {
     el.exportVisualizerSelectionBtn.textContent = `Esporta ${activeCount} ${activeCount === 1 ? "strumento" : "strumenti"}`;
     el.exportVisualizerSelectionBtn.disabled = activeCount === 0;
   }
   if (el.exportVisualizerToPianoBtn) {
     el.exportVisualizerToPianoBtn.disabled = activeCount === 0;
-    el.exportVisualizerToPianoBtn.classList.toggle("hidden", song.variantType === "piano_reduction");
+    el.exportVisualizerToPianoBtn.classList.toggle("hidden", Boolean(song.variantType));
   }
 
   el.detailMeta.innerHTML = [
@@ -1821,10 +1835,12 @@ function renderDetail() {
     `<li><strong>Tracce attive:</strong> ${activeCount} / ${instruments.length || 0}</li>`,
     `<li><strong>Strumenti:</strong> ${escapeHtml(instruments.map((entry) => entry.instrument).join(", ") || "-")}</li>`,
     song.variantType === "piano_reduction" ? `<li class="piano-origin"><strong>Tipo:</strong> ${song.reductionMode === "piano_voice" ? "Piano + voce" : "Riduzione precedente · rigenerare"}</li>` : "",
+    song.versionName ? `<li><strong>Versione:</strong> ${escapeHtml(song.versionName)}</li>` : "",
+    song.derivedFromSongId ? `<li><strong>Originale:</strong> ${getSongById(song.derivedFromSongId) ? escapeHtml(getSongById(song.derivedFromSongId).title) : "Non più disponibile"}</li>` : "",
     `<li><strong>Tag:</strong> ${escapeHtml(tags.join(", ") || "-")}</li>`,
     `<li><strong>Playlist:</strong> ${escapeHtml(playlists.join(", ") || "-")}</li>`,
     `<li><strong>Path JSON:</strong> ${escapeHtml(song.jsonPath || "-")}</li>`,
-    `<li><strong>Path MIDI:</strong> ${escapeHtml(song.midiPath || "-")}</li>`,
+    !song.variantType ? `<li><strong>MIDI originale:</strong> ${song.midiAvailable ? escapeHtml(song.sourceFileName || "Disponibile") : "Non disponibile (brano importato senza MIDI conservato)"}</li>` : "",
   ].join("");
   renderVisualizerLegend(song.id);
 
@@ -2033,11 +2049,16 @@ async function createSelectedPianoReductions() {
 }
 
 function selectNav(view) {
+  if (state.view !== view) state.selectedSongIds.clear();
   state.view = view;
   state.page = 1;
   const currentSong = getSongById(state.selectedSongId);
   if (view === "reductions" && currentSong?.variantType !== "piano_reduction") state.selectedSongId = "";
+  if (view === "selectedVersions" && currentSong?.variantType !== "selected_instruments") state.selectedSongId = "";
+  if (view === "library" && currentSong && !currentSong.midiAvailable) state.selectedSongId = "";
+  if (view === "legacyJson" && currentSong?.midiAvailable) state.selectedSongId = "";
   if (view !== "reductions" && currentSong?.variantType === "piano_reduction") state.selectedSongId = "";
+  if (view !== "selectedVersions" && currentSong?.variantType === "selected_instruments") state.selectedSongId = "";
   if (view !== "playlists") state.selectedPlaylistId = "";
   if (view !== "genres") state.selectedGenre = "";
   if (view !== "artists") state.selectedArtist = "";
@@ -2881,6 +2902,48 @@ function jsonWithSongMetadata(jsonData, song) {
   };
 }
 
+async function saveSelectedVersion() {
+  const song = getSongById(state.selectedSongId);
+  if (!song || song.variantType) return;
+  const versionName = el.selectedVersionName.value;
+  if (!versionName.trim()) { toast("Inserisci un nome per la versione", "error"); return; }
+  showLoading(true);
+  try {
+    const response = await fetch(song.jsonPath);
+    if (!response.ok) throw new Error("Impossibile leggere il JSON del brano");
+    const jsonData = await response.json();
+    const options = trackOptionsFromJson(jsonData, song);
+    const active = activeInstrumentsForSong(song, options);
+    if (!active.length) throw new Error("Seleziona almeno una traccia");
+    const filtered = jsonWithSongMetadata(filterJsonByActiveInstruments(jsonData, song, active), song);
+    const result = await api("/api/selected-versions/create", {
+      method: "POST",
+      body: JSON.stringify({ songId: song.id, versionName: versionName.trim(), jsonData: filtered,
+        instruments: options.filter((entry) => active.includes(entry.id)).map((entry) => entry.instrument) }),
+    });
+    await refreshDb();
+    el.selectedVersionName.value = "";
+    state.selectedSongId = result.song.id;
+    state.player.loadedSongId = "";
+    selectNav("selectedVersions");
+    await loadSelectedSongForPlayer();
+    renderDetail();
+    drawVisualizerFrame();
+    toast("Versione salvata in Strumenti selezionati", "ok");
+  } catch (error) { toast(error.message, "error"); }
+  finally { showLoading(false); }
+}
+
+async function downloadOriginalMidi() {
+  const song = getSongById(state.selectedSongId);
+  if (!song?.midiAvailable) return;
+  try {
+    const response = await fetch(song.midiPath);
+    if (!response.ok) throw new Error("MIDI originale non disponibile");
+    downloadBlob(await response.blob(), song.sourceFileName || `${song.title || "brano"}.mid`);
+  } catch (error) { toast(error.message, "error"); }
+}
+
 async function exportFilteredSongJson() {
   const song = getSongById(state.selectedSongId);
   if (!song) {
@@ -3004,7 +3067,9 @@ async function saveMetadata() {
 async function deleteSongSelected() {
   const song = getSongById(state.selectedSongId);
   if (!song) return;
-  if (!confirm(`Eliminare definitivamente il brano "${song.title}"?`)) return;
+  const derived = (state.db?.songs || []).filter((item) => item.derivedFromSongId === song.id).length;
+  const warning = derived ? `\nLe ${derived} versioni derivate saranno conservate e indicheranno che l'originale non è più disponibile.` : "";
+  if (!confirm(`Eliminare definitivamente il brano "${song.title}" e il suo eventuale MIDI originale?${warning}`)) return;
 
   showLoading(true);
   try {
@@ -3960,7 +4025,7 @@ async function deleteSelectedSongs() {
   }
   const count = selectedSongs.length;
   const label = count === 1 ? "il brano selezionato" : `i ${count} brani selezionati`;
-  if (!confirm(`Eliminare definitivamente ${label}? Questa operazione rimuove anche i relativi file JSON.`)) return;
+  if (!confirm(`Eliminare definitivamente ${label}? I relativi file JSON e MIDI saranno rimossi. Le versioni derivate non selezionate saranno conservate e indicheranno se l'originale non è più disponibile.`)) return;
 
   showLoading(true);
   const failedIds = new Set();
@@ -4004,8 +4069,9 @@ async function exportBackup() {
     const zip = new JSZip();
     const completeFolder = zip.folder("json");
     const pianoFolder = zip.folder("jsonpiano");
+    const selectedFolder = zip.folder("jsonselected");
     for (const file of files) {
-      (file.libraryType === "piano" ? pianoFolder : completeFolder).file(file.fileName, file.content);
+      (file.libraryType === "piano" ? pianoFolder : file.libraryType === "selected" ? selectedFolder : completeFolder).file(file.fileName, file.content);
     }
     const blob = await zip.generateAsync({ type: "blob" });
     const fileName = `pianovisual-json-${Date.now()}.zip`;
@@ -4669,6 +4735,8 @@ function bindEvents() {
   el.toggleFavoriteBtn.addEventListener("click", toggleFavoriteSelected);
   el.exportFilteredJsonBtn.addEventListener("click", exportFilteredSongJson);
   el.exportVisualizerSelectionBtn.addEventListener("click", exportFilteredSongJson);
+  el.saveSelectedVersionBtn.addEventListener("click", saveSelectedVersion);
+  el.downloadOriginalMidiBtn.addEventListener("click", downloadOriginalMidi);
   el.exportVisualizerToPianoBtn.addEventListener("click", exportVisualizerSelectionToPiano);
   el.addToPlaylistBtn.addEventListener("click", addSelectedToPlaylist);
 

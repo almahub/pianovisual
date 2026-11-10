@@ -37,10 +37,13 @@ function defaultDb() {
 async function resetLibrary() {
   await fs.mkdir(jsonDir, { recursive: true });
   await fs.mkdir(pianoJsonDir, { recursive: true });
+  const selectedDir = path.join(libraryDir, 'jsonselected');
+  await fs.mkdir(selectedDir, { recursive: true });
   const entries = await fs.readdir(jsonDir);
   const pianoEntries = await fs.readdir(pianoJsonDir);
   await Promise.all(entries.filter((x) => x.endsWith('.json')).map((x) => fs.rm(path.join(jsonDir, x), { force: true })));
   await Promise.all(pianoEntries.filter((x) => x.endsWith('.json')).map((x) => fs.rm(path.join(pianoJsonDir, x), { force: true })));
+  await Promise.all((await fs.readdir(selectedDir)).filter((x) => x.endsWith('.json')).map((x) => fs.rm(path.join(selectedDir, x), { force: true })));
   await fs.writeFile(dbPath, JSON.stringify(defaultDb(), null, 2) + '\n', 'utf8');
   await fs.writeFile(pianoDbPath, JSON.stringify({ ...defaultDb(), collections: [] }, null, 2) + '\n', 'utf8');
 }
@@ -165,6 +168,52 @@ test.after(async () => {
 
 test.beforeEach(async () => {
   await resetLibrary();
+});
+
+test('MIDI originals and independent selected versions survive exports, sync and source deletion', async () => {
+  const item = makeItem({ sourceFileName: 'original.mid', title: 'Originale', midiSeed: 'original-bytes' });
+  item.jsonData = makeCompatiblePianoVisionJson();
+  const imported = await api('/api/library/import-batch', { method: 'POST', body: JSON.stringify({ items: [item] }) });
+  const original = imported.songs[0];
+  const midiFile = path.join(libraryDir, 'midi', path.basename(original.midiPath));
+  const jsonFile = path.join(jsonDir, path.basename(original.jsonPath));
+  const originalMidi = Buffer.from(item.midiBase64, 'base64');
+  const originalJson = await fs.readFile(jsonFile);
+  assert.deepEqual(await fs.readFile(midiFile), originalMidi);
+  assert.deepEqual(Buffer.from(await (await fetch(`${BASE}${original.midiPath}`)).arrayBuffer()), originalMidi);
+
+  const createVersion = async (index, name) => {
+    const selected = structuredClone(item.jsonData);
+    selected.original.tracks = [selected.original.tracks[index]];
+    selected.supportingTracks = [selected.supportingTracks[index]];
+    return (await api('/api/selected-versions/create', { method: 'POST', body: JSON.stringify({
+      songId: original.id, versionName: name, jsonData: selected, instruments: [name],
+    }) })).song;
+  };
+  const first = await createVersion(0, 'Melodia');
+  const second = await createVersion(2, 'Basso');
+  const reduction = (await api('/api/piano-reduction/create', { method: 'POST', body: JSON.stringify({ songId: original.id }) })).song;
+  assert.notEqual(first.id, second.id);
+  assert.equal(first.title, original.title);
+  assert.equal(first.artist, original.artist);
+  const exported = await (await fetch(`${BASE}${second.jsonPath}`)).json();
+  assert.equal(exported.original.tracks.length, 1);
+  assert.equal(exported.original.tracks[0].name, 'Bass');
+  assert.equal(exported.supportingTracks.length, 1);
+  await api('/api/library/sync-from-json', { method: 'POST', body: '{}' });
+  let songs = (await api('/api/library')).songs;
+  assert.equal(songs.filter((song) => song.variantType === 'selected_instruments').length, 2);
+  assert.equal(songs.find((song) => song.id === original.id).midiAvailable, true);
+  await api(`/api/songs/${first.id}`, { method: 'DELETE' });
+  assert.deepEqual(await fs.readFile(midiFile), originalMidi);
+  assert.deepEqual(await fs.readFile(jsonFile), originalJson);
+  await api(`/api/songs/${original.id}`, { method: 'DELETE' });
+  songs = (await api('/api/library')).songs;
+  assert.equal(songs.some((song) => song.id === original.id), false);
+  assert.equal(songs.find((song) => song.id === second.id).derivedFromSongId, original.id);
+  assert.equal((await fetch(`${BASE}${second.jsonPath}`)).status, 200);
+  assert.equal(songs.find((song) => song.id === reduction.id).derivedFromSongId, original.id);
+  assert.equal((await fetch(`${BASE}${reduction.jsonPath}`)).status, 200);
 });
 
 test('exported JSON restores edited song metadata after reimport', async () => {

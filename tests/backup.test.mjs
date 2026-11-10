@@ -14,12 +14,16 @@ async function fixture() {
   await fs.mkdir(path.join(libraryDir, "json"), { recursive: true });
   await fs.mkdir(path.join(libraryDir, "jsonpiano"), { recursive: true });
   await fs.mkdir(path.join(libraryDir, "exports"), { recursive: true });
+  await fs.mkdir(path.join(libraryDir, "midi"), { recursive: true });
+  await fs.mkdir(path.join(libraryDir, "jsonselected"), { recursive: true });
   const db = { songs: [{ id: "song-1", title: "Agnese", artist: "Ivan Graziani" }], collections: [{ id: "list-1" }] };
   await fs.writeFile(path.join(libraryDir, "db.json"), JSON.stringify(db));
   await fs.writeFile(path.join(libraryDir, "dbpiano.json"), JSON.stringify({ songs: [], collections: [] }));
   await fs.writeFile(path.join(libraryDir, "json", "Agnese.json"), JSON.stringify({ notes: [60, 64, 67] }));
   await fs.writeFile(path.join(libraryDir, "jsonpiano", "Agnese-piano.json"), JSON.stringify({ notes: [60] }));
   await fs.writeFile(path.join(libraryDir, "exports", "example.json"), "exported");
+  await fs.writeFile(path.join(libraryDir, "midi", "original.mid"), Buffer.from([0, 1, 2, 255]));
+  await fs.writeFile(path.join(libraryDir, "jsonselected", "selected.json"), '{"notes":[64]}');
   return { root, libraryDir, archivePath: path.join(root, "backup.zip") };
 }
 
@@ -28,16 +32,18 @@ test("complete backup restores files, metadata, settings and keeps the previous 
   try {
     const created = await createBackupArchive({ libraryDir, targetPath: archivePath,
       settings: { theme: "light", visualizerColors: '{"song-1":{"Piano":"#ff0000"}}' }, appVersion: "1.0.32" });
-    assert.equal(created.fileCount, 5);
+    assert.equal(created.fileCount, 7);
     await fs.writeFile(path.join(libraryDir, "db.json"), JSON.stringify({ songs: [], collections: [] }));
     await fs.writeFile(path.join(libraryDir, "json", "new.json"), "keep previous");
     const result = await restoreBackupArchive({ archivePath, libraryDir });
-    assert.equal(result.fileCount, 5);
+    assert.equal(result.fileCount, 7);
     assert.equal(result.appVersion, "1.0.32");
     assert.equal(result.settings.theme, "light");
     assert.equal(JSON.parse(result.settings.visualizerColors)["song-1"].Piano, "#ff0000");
     assert.equal(JSON.parse(await fs.readFile(path.join(libraryDir, "db.json"))).songs[0].artist, "Ivan Graziani");
     assert.equal(await fs.readFile(path.join(libraryDir, "exports", "example.json"), "utf8"), "exported");
+    assert.deepEqual(await fs.readFile(path.join(libraryDir, "midi", "original.mid")), Buffer.from([0, 1, 2, 255]));
+    assert.equal(await fs.readFile(path.join(libraryDir, "jsonselected", "selected.json"), "utf8"), '{"notes":[64]}');
     assert.equal(await fs.readFile(path.join(result.previousDir, "json", "new.json"), "utf8"), "keep previous");
   } finally {
     await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });

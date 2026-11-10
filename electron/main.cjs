@@ -42,6 +42,8 @@ async function ensureRuntimeLibrary() {
   const base = runtimeLibraryDir();
   const jsonDir = path.join(base, "json");
   const pianoJsonDir = path.join(base, "jsonpiano");
+  const selectedJsonDir = path.join(base, "jsonselected");
+  const midiDir = path.join(base, "midi");
   const exportsDir = path.join(base, "exports");
   const dbPath = path.join(base, "db.json");
   const pianoDbPath = path.join(base, "dbpiano.json");
@@ -49,6 +51,8 @@ async function ensureRuntimeLibrary() {
   await fs.mkdir(base, { recursive: true });
   await fs.mkdir(jsonDir, { recursive: true });
   await fs.mkdir(pianoJsonDir, { recursive: true });
+  await fs.mkdir(selectedJsonDir, { recursive: true });
+  await fs.mkdir(midiDir, { recursive: true });
   await fs.mkdir(exportsDir, { recursive: true });
 
   try {
@@ -66,7 +70,7 @@ async function ensureRuntimeLibrary() {
 
 async function localLibraryJsonFiles() {
   const files = new Map();
-  for (const directoryName of ["json", "jsonpiano"]) {
+  for (const directoryName of ["json", "jsonpiano", "jsonselected"]) {
     const directory = path.join(runtimeLibraryDir(), directoryName);
     for (const fileName of await fs.readdir(directory)) {
       if (!fileName.toLowerCase().endsWith(".json") || path.basename(fileName) !== fileName) continue;
@@ -279,7 +283,9 @@ ipcMain.handle("library:save-json-export", async (_, bytes, suggestedName) => {
   const relativeToPianoLibrary = path.relative(libraryPianoJsonDir, targetPath);
   const insideFullLibrary = relativeToLibrary === "" || (!relativeToLibrary.startsWith("..") && !path.isAbsolute(relativeToLibrary));
   const insidePianoLibrary = relativeToPianoLibrary === "" || (!relativeToPianoLibrary.startsWith("..") && !path.isAbsolute(relativeToPianoLibrary));
-  if (insideFullLibrary || insidePianoLibrary) {
+  const relativeToRoot = path.relative(runtimeLibraryDir(), targetPath);
+  const insideRoot = relativeToRoot === "" || (!relativeToRoot.startsWith("..") && !path.isAbsolute(relativeToRoot));
+  if (insideFullLibrary || insidePianoLibrary || insideRoot) {
     throw new Error("Scegli una destinazione diversa dalle cartelle library\\json e library\\jsonpiano: contengono i file originali delle librerie.");
   }
 

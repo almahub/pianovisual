@@ -36,11 +36,13 @@
           <button class="nav-item" data-view="genres">🏷 Generi</button>
           <button class="nav-item" data-view="favorites">❤️ Preferiti</button>
           <button class="nav-item" data-view="playlists">📚 Playlist</button>
-          <button class="nav-item" data-view="library">🔍 Brani completi</button>
+          <button class="nav-item" data-view="library">🔍 Libreria MIDI</button>
+          <button class="nav-item" data-view="legacyJson">♪ Brani JSON</button>
           <button class="nav-item" data-view="remote">🌐 Catalogo remoto</button>
           <button class="nav-item" data-view="import">⤴ Importa MIDI</button>
           <p class="nav-group-label piano-label">Piano Lab</p>
           <button class="nav-item piano-nav-item" data-view="reductions">♬ Riduzioni pianistiche</button>
+          <button class="nav-item piano-nav-item" data-view="selectedVersions">♪ Strumenti selezionati</button>
         </nav>
 
         <details class="sidebar-block sidebar-group" open>
@@ -463,6 +465,9 @@
                     <div id="visualizerLegend" class="visualizer-legend" aria-label="Strumenti attivi"></div>
                     <div class="viz-export-actions">
                       <button id="exportVisualizerSelectionBtn" class="btn subtle viz-export-btn" type="button">Esporta strumenti selezionati</button>
+                      <label id="selectedVersionNameLabel">Nome versione <input id="selectedVersionName" type="text" maxlength="120" placeholder="Es. Piano e archi" /></label>
+                      <button id="saveSelectedVersionBtn" class="btn subtle viz-export-btn" type="button">Salva versione selezionata</button>
+                      <button id="downloadOriginalMidiBtn" class="btn subtle viz-export-btn" type="button">Scarica MIDI originale</button>
                       <button id="exportVisualizerToPianoBtn" class="btn piano-btn viz-export-btn" type="button">Esporta su Piano</button>
                     </div>
                   </div>

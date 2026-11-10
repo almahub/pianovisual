@@ -18,6 +18,8 @@ const LIBRARY_DIR = process.env.PIANOVISUAL_LIBRARY_DIR
   : path.join(__dirname, "library");
 const JSON_DIR = path.join(LIBRARY_DIR, "json");
 const PIANO_JSON_DIR = path.join(LIBRARY_DIR, "jsonpiano");
+const MIDI_DIR = path.join(LIBRARY_DIR, "midi");
+const SELECTED_JSON_DIR = path.join(LIBRARY_DIR, "jsonselected");
 const EXPORTS_DIR = path.join(LIBRARY_DIR, "exports");
 const DB_PATH = path.join(LIBRARY_DIR, "db.json");
 const PIANO_DB_PATH = path.join(LIBRARY_DIR, "dbpiano.json");
@@ -122,6 +124,8 @@ async function ensureSetup() {
   await fs.mkdir(LIBRARY_DIR, { recursive: true });
   await fs.mkdir(JSON_DIR, { recursive: true });
   await fs.mkdir(PIANO_JSON_DIR, { recursive: true });
+  await fs.mkdir(MIDI_DIR, { recursive: true });
+  await fs.mkdir(SELECTED_JSON_DIR, { recursive: true });
   await fs.mkdir(EXPORTS_DIR, { recursive: true });
   try {
     await fs.access(DB_PATH);
@@ -201,13 +205,17 @@ async function readDb() {
     }
   }
   if (changed || fullDb.songs.some((song) => song.variantType === "piano_reduction")) await writeDb(db);
+  for (const song of db.songs) {
+    const midiFile = songMidiAbsolutePath(song);
+    song.midiAvailable = Boolean(midiFile && await pathExists(midiFile));
+  }
   return db;
 }
 
 async function writeDb(db) {
   await ensureSetup();
   const updatedAt = nowIso();
-  const pianoIds = new Set((db.songs || []).filter((song) => song.variantType === "piano_reduction").map((song) => song.id));
+  const pianoIds = new Set((db.songs || []).filter((song) => ["piano_reduction", "selected_instruments"].includes(song.variantType)).map((song) => song.id));
   const fullDb = {
     ...db,
     songs: (db.songs || []).filter((song) => !pianoIds.has(song.id)),
@@ -288,8 +296,8 @@ async function writeJsonAtomic(absPath, jsonData) {
 }
 
 function songJsonAbsolutePath(song, fallbackFileName = "") {
-  const directory = song?.variantType === "piano_reduction" ? PIANO_JSON_DIR : JSON_DIR;
-  const prefix = song?.variantType === "piano_reduction" ? "/library/jsonpiano/" : "/library/json/";
+  const directory = song?.variantType === "piano_reduction" ? PIANO_JSON_DIR : song?.variantType === "selected_instruments" ? SELECTED_JSON_DIR : JSON_DIR;
+  const prefix = song?.variantType === "piano_reduction" ? "/library/jsonpiano/" : song?.variantType === "selected_instruments" ? "/library/jsonselected/" : "/library/json/";
   const jsonPath = String(song?.jsonPath || "").replace(/\\/g, "/");
   const relative = jsonPath.startsWith(prefix)
     ? jsonPath.slice(prefix.length)
@@ -298,6 +306,25 @@ function songJsonAbsolutePath(song, fallbackFileName = "") {
   const insideDirectory = absolute === directory || absolute.startsWith(`${directory}${path.sep}`);
   if (!relative || !insideDirectory) throw new Error("Percorso JSON della libreria non valido");
   return absolute;
+}
+
+function songMidiAbsolutePath(song) {
+  const prefix = "/library/midi/";
+  const value = String(song?.midiPath || "");
+  if (!value.startsWith(prefix)) return "";
+  const name = value.slice(prefix.length);
+  if (!name || path.basename(name) !== name || !/\.mid(?:i)?$/i.test(name)) return "";
+  return path.join(MIDI_DIR, name);
+}
+
+async function storeMidi(buffer, songId, hash) {
+  const name = `${songId}-${hash}.mid`;
+  try { await fs.writeFile(path.join(MIDI_DIR, name), buffer, { flag: "wx" }); }
+  catch (error) {
+    if (error.code !== "EEXIST") throw error;
+    if (hashBuffer(await fs.readFile(path.join(MIDI_DIR, name))) !== hash) throw new Error("Il MIDI salvato non corrisponde all'originale");
+  }
+  return `/library/midi/${name}`;
 }
 
 async function pianoReductionScriptPath() {
@@ -477,7 +504,7 @@ function migrateDbSchema(db) {
       song.genre = "";
       changed = true;
     }
-    if (song.midiPath !== "") {
+    if (typeof song.midiPath !== "string") {
       song.midiPath = "";
       changed = true;
     }
@@ -632,8 +659,9 @@ function validatePianoVisionJsonData(jsonData) {
 }
 
 function findDuplicateSong(db, { hash, title, artist }) {
-  const duplicateByHash = hash ? db.songs.find((s) => s.fileHash === hash) : null;
-  const duplicateByName = db.songs.find(
+  const originals = db.songs.filter((song) => !song.variantType);
+  const duplicateByHash = hash ? originals.find((s) => s.fileHash === hash) : null;
+  const duplicateByName = originals.find(
     (s) =>
       normalizeText(artist) &&
       normalizeText(s.title) === normalizeText(title) &&
@@ -651,7 +679,7 @@ function hashJsonData(jsonData) {
 
 async function findDuplicateJsonSong(db, { hash, fileName }) {
   const expectedVariant = /-piano(?:-\d+)?\.json$/i.test(String(fileName || "")) ? "piano_reduction" : "full";
-  const sameVariant = (song) => (song.variantType === "piano_reduction" ? "piano_reduction" : "full") === expectedVariant;
+  const sameVariant = (song) => song.variantType !== "selected_instruments" && (song.variantType === "piano_reduction" ? "piano_reduction" : "full") === expectedVariant;
   const direct = db.songs.find((song) => sameVariant(song) && (song.jsonContentHash === hash || song.fileHash === hash));
   if (direct) return direct;
 
@@ -900,6 +928,42 @@ async function handleApi(req, res, url) {
     return true;
   }
 
+  if (req.method === "POST" && url.pathname === "/api/selected-versions/create") {
+    const payload = await readBodyJson(req);
+    const db = await readDb();
+    const source = songById(db, String(payload.songId || ""));
+    if (!source || source.variantType) {
+      sendJson(res, 400, { error: "Seleziona un brano sorgente" });
+      return true;
+    }
+    const versionName = String(payload.versionName || "").trim().slice(0, 120);
+    const validation = validatePianoVisionJsonData(payload.jsonData);
+    if (!versionName || !validation.ok) {
+      sendJson(res, 400, { error: !versionName ? "Nome versione richiesto" : `JSON non valido: ${validation.errors.join(", ")}` });
+      return true;
+    }
+    const id = uid("selected");
+    const fileName = `${id}.json`;
+    const data = structuredClone(payload.jsonData);
+    data.name = source.title || "Senza titolo";
+    data.artist = source.artist || "";
+    await writeJsonAtomic(path.join(SELECTED_JSON_DIR, fileName), data);
+    const hash = hashJsonData(data);
+    const song = {
+      id, title: source.title, artist: source.artist, composer: source.composer,
+      genre: source.genre, difficulty: source.difficulty, key: source.key, bpm: source.bpm,
+      duration: Number(data.song_length || 0), instruments: Array.isArray(payload.instruments) ? payload.instruments.slice(0, 128).map(String) : [],
+      importedAt: nowIso(), updatedAt: nowIso(), fileHash: hash, jsonContentHash: hash,
+      sourceFileName: fileName, jsonPath: `/library/jsonselected/${fileName}`, midiPath: "",
+      variantType: "selected_instruments", derivedFromSongId: source.id, versionName,
+    };
+    db.songs.push(song);
+    db.practiceMeta.push({ songId: id, lastPracticePointSec: 0, playbackSpeed: 1, favoriteLoops: [], studyStatus: "to_study" });
+    await writeDb(db);
+    sendJson(res, 200, { song });
+    return true;
+  }
+
   if (req.method === "POST" && url.pathname === "/api/piano-reduction/create") {
     const payload = await readBodyJson(req);
     const arrangementMode = "piano_voice";
@@ -910,13 +974,13 @@ async function handleApi(req, res, url) {
       sendJson(res, 404, { error: "Brano sorgente non trovato" });
       return true;
     }
-    if (sourceSong.variantType === "piano_reduction") {
+    if (sourceSong.variantType) {
       sendJson(res, 400, { error: "Il brano selezionato è già una riduzione pianistica" });
       return true;
     }
     const equivalentSourceIds = new Set(
       db.songs
-        .filter((song) => song.variantType !== "piano_reduction" && areSourceSongsEquivalent(song, sourceSong))
+        .filter((song) => !song.variantType && areSourceSongsEquivalent(song, sourceSong))
         .map((song) => song.id),
     );
     const existing = db.songs.find(
@@ -1140,7 +1204,7 @@ async function handleApi(req, res, url) {
   if (req.method === "GET" && url.pathname === "/api/library/json-files") {
     await ensureSetup();
     const files = [];
-    for (const [libraryType, directory] of [["complete", JSON_DIR], ["piano", PIANO_JSON_DIR]]) {
+    for (const [libraryType, directory] of [["complete", JSON_DIR], ["piano", PIANO_JSON_DIR], ["selected", SELECTED_JSON_DIR]]) {
       const entries = await fs.readdir(directory, { withFileTypes: true });
       for (const entry of entries) {
         if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".json")) continue;
@@ -1346,6 +1410,12 @@ async function handleApi(req, res, url) {
         }
 
         if (duplicate && conflictPolicy === "overwrite") {
+          if (duplicate.midiAvailable) {
+            const reason = "Il brano conserva un MIDI originale: non può essere sovrascritto con un JSON";
+            skipped.push({ fileName: safeFile, reason, existingSongId: duplicate.id });
+            report.push({ sourceFileName: safeFile, status: "skipped", reason });
+            continue;
+          }
           const duplicateDir = duplicate.variantType === "piano_reduction" ? PIANO_JSON_DIR : JSON_DIR;
           const duplicateFile = path.basename(String(duplicate.jsonPath || duplicate.sourceFileName || safeFile));
           const targetJsonAbs = path.join(duplicateDir, duplicateFile);
@@ -1449,10 +1519,11 @@ async function handleApi(req, res, url) {
 
     let filesOnDisk = [];
     try {
-      const [fullNames, pianoNames] = await Promise.all([fs.readdir(JSON_DIR), fs.readdir(PIANO_JSON_DIR)]);
+      const [fullNames, pianoNames, selectedNames] = await Promise.all([fs.readdir(JSON_DIR), fs.readdir(PIANO_JSON_DIR), fs.readdir(SELECTED_JSON_DIR)]);
       filesOnDisk = [
         ...fullNames.map((fileName) => ({ fileName, directory: JSON_DIR, variantType: "", relPath: `/library/json/${fileName}` })),
         ...pianoNames.map((fileName) => ({ fileName, directory: PIANO_JSON_DIR, variantType: "piano_reduction", relPath: `/library/jsonpiano/${fileName}` })),
+        ...selectedNames.map((fileName) => ({ fileName, directory: SELECTED_JSON_DIR, variantType: "selected_instruments", relPath: `/library/jsonselected/${fileName}` })),
       ];
     } catch {
       sendJson(res, 500, { error: "Impossibile leggere la cartella JSON." });
@@ -1496,9 +1567,9 @@ async function handleApi(req, res, url) {
       const hash = hashJsonData(jsonData);
       const meta = inferSongMetadataFromJson(jsonData, fileName);
       const existing =
-        db.songs.find((song) => (song.variantType || "") === variantType && song.jsonContentHash === hash) ||
-        db.songs.find((song) => (song.variantType || "") === variantType && song.fileHash === hash) ||
         db.songs.find((song) => song.jsonPath === relPath) ||
+        (variantType !== "selected_instruments" && db.songs.find((song) => (song.variantType || "") === variantType && song.jsonContentHash === hash)) ||
+        (variantType !== "selected_instruments" && db.songs.find((song) => (song.variantType || "") === variantType && song.fileHash === hash)) ||
         db.songs.find((song) => (song.variantType || "") === variantType && song.sourceFileName === fileName);
 
       if (existing) {
@@ -1576,7 +1647,7 @@ async function handleApi(req, res, url) {
     for (const song of db.songs) {
       const fileName = path.basename(String(song.jsonPath || song.sourceFileName || ""));
       if (!fileName) continue;
-      const abs = path.join(song.variantType === "piano_reduction" ? PIANO_JSON_DIR : JSON_DIR, fileName);
+      const abs = songJsonAbsolutePath(song);
       if (!(await pathExists(abs))) {
         missingOnDisk.push({ songId: song.id, jsonPath: song.jsonPath || "" });
       }
@@ -1730,8 +1801,13 @@ async function handleApi(req, res, url) {
             });
             continue;
           }
+          if (targetSong.variantType) {
+            skipped.push({ sourceFileName, reason: "Non è possibile sovrascrivere una versione derivata con un MIDI", existingSongId: targetSong.id });
+            continue;
+          }
 
           const targetJsonAbs = songJsonAbsolutePath(targetSong, `${hashPrefix}-${targetSong.id}.json`);
+          const midiPath = await storeMidi(midiBuffer, targetSong.id, hash);
           await writeJsonAtomic(targetJsonAbs, jsonData);
 
           targetSong.title = repairMojibake(songMeta.title || "Senza titolo");
@@ -1748,7 +1824,7 @@ async function handleApi(req, res, url) {
           targetSong.jsonContentHash = hashJsonData(jsonData);
           targetSong.sourceFileName = sourceFileName;
           targetSong.jsonPath = `/library/json/${path.basename(targetJsonAbs)}`;
-          targetSong.midiPath = "";
+          targetSong.midiPath = midiPath;
 
           let practice = db.practiceMeta.find((pm) => pm.songId === targetSong.id);
           if (!practice) {
@@ -1789,6 +1865,7 @@ async function handleApi(req, res, url) {
         }
 
         const jsonPath = path.join(JSON_DIR, jsonFileName);
+        const midiPath = await storeMidi(midiBuffer, songId, hash);
         await writeJsonAtomic(jsonPath, jsonData);
 
         const song = {
@@ -1808,7 +1885,7 @@ async function handleApi(req, res, url) {
           jsonContentHash: hashJsonData(jsonData),
           sourceFileName,
           jsonPath: `/library/json/${jsonFileName}`,
-          midiPath: "",
+          midiPath,
         };
 
         db.songs.push(song);
@@ -1946,7 +2023,7 @@ async function handleApi(req, res, url) {
     db.practiceMeta = db.practiceMeta.filter((pm) => pm.songId !== songId);
 
     const jsonFile = songJsonAbsolutePath(song);
-    const midiFile = "";
+    const midiFile = songMidiAbsolutePath(song);
     await fs.rm(jsonFile, { force: true });
     if (midiFile) await fs.rm(midiFile, { force: true });
 

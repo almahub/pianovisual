@@ -10,6 +10,8 @@ release/
 library/json/*
 !library/json/.gitkeep
 library/jsonpiano/*
+library/midi/*
+library/jsonselected/*
 library/exports/*
 !library/exports/.gitkeep
 

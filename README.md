@@ -43,7 +43,10 @@ La riga di stato indica se il branch locale e `origin/main` sono avanti o indiet
 git pull --ff-only origin main
 ```
 `--ff-only` interrompe l'operazione se serve un merge. Se hai modifiche locali o il branch e avanti, controlla prima `git status` e i commit con `git log --oneline --decorate -10`.
-Il repository contiene il template `library/db.example.json` e i due file dimostrativi in `samples/json/`. I dati della libreria personale, incluse le riduzioni in `library/jsonpiano/`, restano locali e non vengono inviati a GitHub.
+Il repository contiene il template `library/db.example.json` e i due file dimostrativi in `samples/json/`. I dati della libreria personale restano locali e non vengono inviati a GitHub: MIDI originali in `library/midi/`, JSON completi in `library/json/`, riduzioni in `library/jsonpiano/` e versioni selezionate in `library/jsonselected/`.
+
+### MIDI e versioni
+I MIDI importati sono conservati byte per byte nella libreria e sono scaricabili dai dettagli del brano. I JSON importati e i brani precedenti per i quali il MIDI non e stato conservato restano disponibili in `Brani JSON`. Dal Visualizer scegli le tracce, inserisci un nome e usa `Salva versione selezionata`: la nuova versione compare in Piano Lab e non modifica la sorgente. Le riduzioni pianistiche restano nella propria sezione. Eliminando un originale, le sue versioni rimangono disponibili e segnalano l'assenza della sorgente. Se reimporti un vecchio MIDI, scegli la sovrascrittura del brano corrispondente per collegarlo alla voce esistente; verifica prima di procedere i dati che saranno aggiornati.
 
 ## Avvio senza VS Code (quick win)
 - Windows launcher: `scripts\start-pianovisual.bat`
@@ -53,7 +56,7 @@ Il repository contiene il template `library/db.example.json` e i due file dimost
   3. usa l'icona `PianoVisual` sul desktop
 
 ## App desktop installabile (Electron)
-Versione rilasciata piu recente nel repository: **v1.0.33**. Vedi [note di rilascio v1.0.33](RELEASE_NOTES_v1.0.33.md) e [changelog completo](CHANGELOG.md). Nel repository restano solo le ultime tre note di rilascio.
+Versione rilasciata piu recente nel repository: **v1.0.34**. Vedi [note di rilascio v1.0.34](RELEASE_NOTES_v1.0.34.md) e [changelog completo](CHANGELOG.md). Nel repository restano solo le ultime tre note di rilascio.
 
 ### Backup e ripristino
 Nell'app desktop, apri `File e backup` e usa `Backup completo` per salvare in uno ZIP tutta la cartella dati della libreria (database, JSON, riduzioni, export e altri file) insieme a tema e colori del Visualizer. Conserva lo ZIP fuori dalla libreria, preferibilmente anche su un altro disco: non e cifrato e contiene i tuoi dati personali. Per ripristinare, installa PianoVisual, scegli `Ripristina backup` e conferma. L'app verifica lo ZIP e conserva la libreria precedente in una cartella `library.before-restore-*` accanto alla libreria corrente. Lo ZIP non contiene l'eseguibile: la versione originale e indicata nel manifesto e si reinstalla dalla relativa release GitHub.
