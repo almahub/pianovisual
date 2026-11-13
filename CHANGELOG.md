@@ -3,6 +3,20 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+## [1.0.38] - 2026-11-13
+### Added
+- Piano fedele alle tracce scelte, assegnazione manuale delle mani e divisione di una traccia per nota MIDI.
+- Scelta dei JSON da inviare al Quest e verifica hash dopo la copia.
+
+### Fixed
+- Protezione dei JSON sorgente durante la migrazione delle riduzioni con lo stesso nome.
+- Corretto un falso errore di polifonia della mano sinistra causato dagli arrotondamenti.
+- Riepilogo MIDI e segnalazione dei JSON mancanti senza eliminazione automatica dei record.
+- Migliorata la classificazione automatica delle tracce molto gravi e la visualizzazione di titoli con artista ripetuto.
+
+### Changed
+- Comandi del Visualizer semplificati; il workflow non elimina le release precedenti.
+
 ## [1.0.37] - 2026-11-10
 ### Added
 - Controllo indicativo del JSON e copertina per brano mediante URL HTTPS, conservata nei metadati locali.

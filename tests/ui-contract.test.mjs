@@ -34,8 +34,7 @@ test("ui critical controls exist for key workflows", async () => {
     "questStatusBtn",
     "questPullBtn",
     "questPushBtn",
-    "exportVisualizerSelectionBtn",
-    "exportVisualizerToPianoBtn",
+    "saveFaithfulPianoBtn",
     "downloadImportReportBtn",
     "archiveConflictPolicySelect",
     "archiveDedupPolicySelect",
@@ -44,6 +43,10 @@ test("ui critical controls exist for key workflows", async () => {
   for (const id of requiredIds) {
     assert.equal(html.includes(`id=\"${id}\"`), true, `missing #${id}`);
   }
+  assert.equal(html.includes('id="exportVisualizerSelectionBtn"'), false);
+  assert.ok(html.indexOf('id="saveFaithfulPianoBtn"') < html.indexOf('id="downloadOriginalMidiBtn"'));
+  assert.match(html, /id="saveFaithfulPianoBtn"[^>]*>Salva Piano</);
+  assert.match(html, /id="convertSelectedPianoBtn"[^>]*>Converti per Piano</);
 });
 
 test("secondary UI controls are grouped into collapsible sections", async () => {
@@ -129,9 +132,10 @@ test("visualizer export rebuilds PianoVision tracks from selected instruments", 
   assert.equal(app.includes("clone.tracksV2 = buildTracksV2("), true);
   assert.equal(app.includes("clone.song_length = Math.max(0, filteredDuration)"), true);
   assert.equal(app.includes("filteredByInstruments"), true);
-  assert.equal(app.includes("async function exportVisualizerSelectionToPiano()"), true);
+  assert.equal(app.includes("async function saveFaithfulPiano()"), true);
   assert.equal(app.includes("sourceJson: filtered"), true);
-  assert.equal(app.includes('el.exportVisualizerToPianoBtn.addEventListener("click", exportVisualizerSelectionToPiano)'), true);
+  assert.equal(app.includes('el.saveFaithfulPianoBtn.addEventListener("click", saveFaithfulPiano)'), true);
+  assert.equal(app.includes("exportVisualizerToPianoBtn"), false);
   assert.equal(app.includes('el.exportSelectedFilteredBtn.addEventListener("click", exportSelectedFilteredJson)'), true);
   assert.equal(app.includes('const fileName = `${sanitizeFileName(song.title || song.id || "song")}.json`'), true);
   assert.equal(app.includes('`${base}-filtered.json`'), false);
@@ -291,7 +295,7 @@ test("batch filtered export keeps song titles and separates duplicate filenames"
     { id: "song-b", title: "Stesso Titolo", artist: "Artista B", jsonPath: "/b.json", activeInstruments: ["Violino"] },
   ];
   const run = new Function("state", "el", "toast", "showLoading", "JSZip", "fetch", "trackOptionsFromJson",
-    "activeInstrumentsForSong", "filterJsonByActiveInstruments", "jsonWithSongMetadata", "sanitizeFileName", "downloadBlob", "updateSelectionInfo",
+    "activeInstrumentsForSong", "filterJsonByActiveInstruments", "jsonWithSongMetadata", "sanitizeFileName", "downloadBlob", "updateSelectionInfo", "inspectPianoVisionJson",
     `${source}\nreturn exportSelectedFilteredJson;`)(
     { db: { songs }, selectedSongIds: new Set(songs.map((song) => song.id)) },
     { exportSelectedFilteredBtn: { disabled: false } },
@@ -304,6 +308,7 @@ test("batch filtered export keeps song titles and separates duplicate filenames"
     (name) => name,
     (blob, name) => { downloaded = { blob, name }; },
     () => {},
+    () => ({ errors: [], warnings: [] }),
   );
   await run();
   assert.equal(downloaded.name, "pianovisual-json-selezionati.zip");

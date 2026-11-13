@@ -74,7 +74,7 @@ async function localLibraryJsonFiles() {
     const directory = path.join(runtimeLibraryDir(), directoryName);
     for (const fileName of await fs.readdir(directory)) {
       if (!fileName.toLowerCase().endsWith(".json") || path.basename(fileName) !== fileName) continue;
-      if (!files.has(fileName)) files.set(fileName, path.join(directory, fileName));
+      files.set(`${directoryName}/${fileName}`, { directoryName, fileName, localPath: path.join(directory, fileName) });
     }
   }
   return files;
@@ -118,7 +118,7 @@ async function getQuestDevice() {
 }
 
 async function remoteQuestFiles(serial) {
-  const command = `mkdir -p '${QUEST_JSON_DIR}' && sha256sum '${QUEST_JSON_DIR}'/*.json 2>/dev/null || true`;
+  const command = `if [ -d '${QUEST_JSON_DIR}' ]; then for f in '${QUEST_JSON_DIR}'/*.json; do [ -f "$f" ] || continue; sha256sum "$f" || exit 1; done; fi`;
   const { stdout } = await runAdb(["-s", serial, "shell", command]);
   return stdout
     .split(/\r?\n/)
@@ -354,10 +354,10 @@ ipcMain.handle("quest:preview-push", async () => {
   const localFiles = await localLibraryJsonFiles();
   const remoteMap = new Map((await remoteQuestFiles(serial)).map((item) => [item.fileName, item.hash]));
   const files = [];
-  for (const [fileName, localPath] of localFiles) {
+  for (const [id, { fileName, directoryName, localPath }] of localFiles) {
     const hash = await sha256File(localPath);
     const remoteHash = remoteMap.get(fileName) || "";
-    files.push({ fileName, status: !remoteHash ? "new" : remoteHash === hash ? "same" : "changed" });
+    files.push({ id, fileName, directoryName, localHash: hash, remoteHash, status: !remoteHash ? "new" : remoteHash === hash ? "same" : "changed" });
   }
   return {
     serial,
@@ -371,27 +371,39 @@ ipcMain.handle("quest:preview-push", async () => {
   };
 });
 
-ipcMain.handle("quest:push-json", async (_, requestedNames) => {
+ipcMain.handle("quest:push-json", async (_, requestedFiles) => {
   const serial = await getQuestDevice();
-  const names = Array.isArray(requestedNames) ? [...new Set(requestedNames)] : [];
-  if (names.length === 0 || names.length > 5000) throw new Error("Selezione file non valida");
+  const selection = Array.isArray(requestedFiles) ? requestedFiles : [];
+  if (selection.length === 0 || selection.length > 5000) throw new Error("Selezione file non valida");
   const localFiles = await localLibraryJsonFiles();
+  const remoteBefore = new Map((await remoteQuestFiles(serial)).map((item) => [item.fileName, item.hash]));
+  const seenNames = new Set();
+  for (const item of selection) {
+    const local = localFiles.get(item?.id);
+    if (!local || !/^[a-f0-9]{64}$/.test(item.localHash || "") || !/^(?:[a-f0-9]{64})?$/.test(item.remoteHash || "")) throw new Error("Selezione file non valida: ripeti l'anteprima.");
+    if (seenNames.has(local.fileName.toLowerCase())) throw new Error(`Seleziona una sola versione di ${local.fileName}.`);
+    seenNames.add(local.fileName.toLowerCase());
+    if (await sha256File(local.localPath) !== item.localHash || (remoteBefore.get(local.fileName) || "") !== item.remoteHash) throw new Error(`Il file ${local.fileName} e cambiato dopo l'anteprima. Ripeti il confronto.`);
+  }
   await runAdb(["-s", serial, "shell", "mkdir", "-p", QUEST_JSON_DIR]);
-  let copied = 0;
   const errors = [];
-  for (const fileName of names) {
-    if (path.basename(fileName) !== fileName || !fileName.toLowerCase().endsWith(".json")) {
-      errors.push({ fileName, error: "Nome file non valido" });
-      continue;
-    }
+  const pushed = [];
+  for (const item of selection) {
+    const { fileName, localPath } = localFiles.get(item.id);
     try {
-      const localPath = localFiles.get(fileName);
-      if (!localPath) throw new Error("File non trovato nella libreria completa o piano");
       await runAdb(["-s", serial, "push", localPath, `${QUEST_JSON_DIR}/${fileName}`]);
-      copied += 1;
+      pushed.push({ fileName, hash: item.localHash });
     } catch (error) {
       errors.push({ fileName, error: error.message });
     }
+  }
+  let verified = new Map();
+  try { verified = new Map((await remoteQuestFiles(serial)).map((item) => [item.fileName, item.hash])); }
+  catch (error) { for (const item of pushed) errors.push({ fileName: item.fileName, error: `Verifica non riuscita: ${error.message}` }); return { serial, remotePath: QUEST_JSON_DIR, copied: 0, errors }; }
+  let copied = 0;
+  for (const item of pushed) {
+    if (verified.get(item.fileName) === item.hash) copied += 1;
+    else errors.push({ fileName: item.fileName, error: "Hash sul Quest diverso o non disponibile dopo la copia" });
   }
   return { serial, remotePath: QUEST_JSON_DIR, copied, errors };
 });

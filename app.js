@@ -2,6 +2,7 @@ import { Midi } from "https://cdn.jsdelivr.net/npm/@tonejs/midi@2.0.28/+esm";
 import * as Tone from "https://cdn.jsdelivr.net/npm/tone@15.1.22/+esm";
 import JSZip from "https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm";
 import { inspectPianoVisionJson } from "./compatibility.js";
+import { titleWithoutArtist } from "./artist-inference.js";
 
 const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
@@ -153,12 +154,18 @@ const el = {
   playerSpeedSelect: document.getElementById("playerSpeedSelect"),
   visualizerCanvas: document.getElementById("visualizerCanvas"),
   visualizerLegend: document.getElementById("visualizerLegend"),
-  exportVisualizerSelectionBtn: document.getElementById("exportVisualizerSelectionBtn"),
+  selectionSummary: document.getElementById("selectionSummary"),
+  handAssignmentPanel: document.getElementById("handAssignmentPanel"),
+  rightHandTrack: document.getElementById("rightHandTrack"),
+  leftHandTrack: document.getElementById("leftHandTrack"),
+  splitHandTrack: document.getElementById("splitHandTrack"),
+  splitHandMidi: document.getElementById("splitHandMidi"),
+  handAssignmentStatus: document.getElementById("handAssignmentStatus"),
   saveSelectedVersionBtn: document.getElementById("saveSelectedVersionBtn"),
   selectedVersionName: document.getElementById("selectedVersionName"),
   selectedVersionNameLabel: document.getElementById("selectedVersionNameLabel"),
   downloadOriginalMidiBtn: document.getElementById("downloadOriginalMidiBtn"),
-  exportVisualizerToPianoBtn: document.getElementById("exportVisualizerToPianoBtn"),
+  saveFaithfulPianoBtn: document.getElementById("saveFaithfulPianoBtn"),
   footerTrackTitle: document.getElementById("footerTrackTitle"),
   footerTrackArtist: document.getElementById("footerTrackArtist"),
   miniVisualizer: document.getElementById("miniVisualizer"),
@@ -1040,8 +1047,25 @@ function buildMeasureEntry({ measure, measureIndex, notes, handPrefix, direction
   };
 }
 
-function buildTracksV2(tracks, measures, ppq, tempos = [{ ticks: 0, bpm: 120 }]) {
-  const { rightTrack, leftTrack, splitSingle } = splitHands(tracks);
+function buildTracksV2(tracks, measures, ppq, tempos = [{ ticks: 0, bpm: 120 }], assignment = null) {
+  let { rightTrack, leftTrack, splitSingle } = splitHands(tracks);
+  let splitMidi = 60;
+  if (assignment && Number.isInteger(assignment.splitTrack)) {
+    rightTrack = tracks[assignment.splitTrack] || null;
+    leftTrack = null;
+    splitSingle = true;
+    splitMidi = assignment.splitMidi;
+  } else if (assignment && (assignment.right !== "auto" || assignment.left !== "auto")) {
+    const pick = (value, fallback) => value === "auto" ? fallback : value === "none" ? null : tracks[value] || null;
+    rightTrack = pick(assignment.right, rightTrack);
+    leftTrack = pick(assignment.left, leftTrack);
+    if (rightTrack && rightTrack === leftTrack) {
+      const alternatives = tracks.filter((track) => track !== rightTrack && track.notes?.length).sort((a, b) => avgPitch(a) - avgPitch(b));
+      if (assignment.right === "auto") rightTrack = alternatives.at(-1) || null;
+      else if (assignment.left === "auto") leftTrack = alternatives[0] || null;
+    }
+    splitSingle = false;
+  }
   const right = [];
   const left = [];
   let rightId = 0;
@@ -1058,7 +1082,7 @@ function buildTracksV2(tracks, measures, ppq, tempos = [{ ticks: 0, bpm: 120 }])
     if (splitSingle && rightTrack) {
       for (const n of rightTrack.notes || []) {
         if (n.ticks >= mStart && n.ticks < mEnd) {
-          if ((n.midi || 0) >= 60) rightNotes.push(n);
+          if ((n.midi || 0) >= splitMidi) rightNotes.push(n);
           else leftNotes.push(n);
         }
       }
@@ -1308,7 +1332,7 @@ function filteredSongs() {
   let list = [...(state.db?.songs || [])];
   if (state.view === "reductions") list = list.filter((song) => song.variantType === "piano_reduction");
   else if (state.view === "selectedVersions") list = list.filter((song) => song.variantType === "selected_instruments");
-  else list = list.filter((song) => !["piano_reduction", "selected_instruments"].includes(song.variantType));
+  else list = list.filter((song) => !["piano_reduction", "selected_instruments"].includes(song.variantType) && (song.midiAvailable || song.jsonAvailable !== false));
   if (state.view === "library") list = list.filter((song) => song.midiAvailable);
   if (state.view === "legacyJson") list = list.filter((song) => !song.midiAvailable);
 
@@ -1456,8 +1480,9 @@ function renderTable() {
             <div class="song-cell">
               <div class="cover">${imageUrl ? `<img src="${escapeHtml(imageUrl)}" alt="" data-fallback="${escapeHtml(avatar)}" loading="lazy" />` : escapeHtml(avatar)}</div>
               <div>
-                <strong>${escapeHtml(song.title || "Senza titolo")}</strong><br />
+                <strong>${escapeHtml(titleWithoutArtist(song.title, song.artist) || "Senza titolo")}</strong><br />
                 <small>${pianoVariant ? '<span class="piano-table-badge">Piano</span>' : isFavorite(song.id) ? "★ Preferito" : ""}</small>
+                ${song.jsonAvailable === false ? '<small class="song-source-name">JSON sorgente non disponibile</small>' : ""}
                 ${sourceLabel ? `<small class="song-source-name" title="${escapeHtml(sourceLabel)}">${escapeHtml(sourceLabel)}</small>` : ""}
               </div>
             </div>
@@ -1491,19 +1516,21 @@ function renderTable() {
 
 function renderDirectoryPanel() {
   const allSongs = state.db?.songs || [];
-  const songs = allSongs.filter((song) => !["piano_reduction", "selected_instruments"].includes(song.variantType));
+  const songs = allSongs.filter((song) => !["piano_reduction", "selected_instruments"].includes(song.variantType) && (song.midiAvailable || song.jsonAvailable !== false));
   const reductionCount = allSongs.filter((song) => song.variantType === "piano_reduction").length;
   const manual = (state.db?.collections || []).filter((c) => c.type === "playlist" && !c.smartRule);
   el.playlistsCards.classList.toggle("home-dashboard", state.view === "home");
 
   if (state.view === "home") {
-    const recentCount = songs
+    const midiSongs = songs.filter((song) => song.midiAvailable);
+    const missingJsonCount = midiSongs.filter((song) => song.jsonAvailable === false).length;
+    const recentCount = midiSongs
       .filter((s) => Date.now() - new Date(s.importedAt).getTime() <= 30 * 24 * 60 * 60 * 1000)
       .length;
-    const toStudyCount = (state.db?.practiceMeta || []).filter((p) => p.studyStatus === "to_study").length;
-    const favoriteCount = songs.filter((s) => isFavorite(s.id)).length;
-    const artistCount = new Set(songs.map((s) => normalizeText(s.artist)).filter(Boolean)).size;
-    const latestSongs = [...songs]
+    const toStudyCount = midiSongs.filter((song) => practiceBySong(song.id)?.studyStatus === "to_study").length;
+    const favoriteCount = midiSongs.filter((s) => isFavorite(s.id)).length;
+    const artistCount = new Set(midiSongs.map((s) => normalizeText(s.artist)).filter(Boolean)).size;
+    const latestSongs = [...midiSongs]
       .sort((a, b) => new Date(b.importedAt).getTime() - new Date(a.importedAt).getTime())
       .slice(0, 5);
     const latestMarkup = latestSongs.length
@@ -1511,7 +1538,7 @@ function renderDirectoryPanel() {
           .map((song) => `
             <li>
               <span class="home-recent-marker" aria-hidden="true">♪</span>
-              <span><strong>${escapeHtml(song.title || "Senza titolo")}</strong><small>${escapeHtml(song.artist || song.composer || "Artista non indicato")}</small></span>
+              <span><strong>${escapeHtml(titleWithoutArtist(song.title, song.artist) || "Senza titolo")}</strong><small>${escapeHtml(song.artist || song.composer || "Artista non indicato")}</small></span>
               <time>${new Date(song.importedAt).toLocaleDateString("it-IT", { day: "2-digit", month: "short" })}</time>
             </li>`)
           .join("")
@@ -1521,14 +1548,14 @@ function renderDirectoryPanel() {
       <article class="home-welcome-card">
         <div>
           <span class="home-eyebrow">PianoVisual</span>
-          <strong>${songs.length ? "Bentornato nella tua libreria" : "Inizia la tua libreria musicale"}</strong>
-          <p>${songs.length ? `Hai ${songs.length} brani disponibili. Scegli dove continuare.` : "Importa un MIDI o cerca un brano nel catalogo remoto."}</p>
+          <strong>${midiSongs.length ? "Bentornato nella tua libreria" : "Inizia la tua libreria musicale"}</strong>
+          <p>${midiSongs.length ? `Hai ${midiSongs.length} MIDI in libreria.${missingJsonCount ? ` ${missingJsonCount} senza JSON sorgente.` : ""}` : "Importa un MIDI o cerca un brano nel catalogo remoto."}</p>
         </div>
         <button class="btn" data-nav-target="library">Apri la libreria</button>
       </article>
 
       <div class="home-stats" aria-label="Riepilogo libreria">
-        <article class="home-stat-card"><span>Brani</span><strong>${songs.length}</strong><small>totali in libreria</small></article>
+        <article class="home-stat-card"><span>Libreria MIDI</span><strong>${midiSongs.length}</strong><small>MIDI originali</small></article>
         <article class="home-stat-card"><span>Artisti</span><strong>${artistCount}</strong><small>catalogati</small></article>
         <article class="home-stat-card"><span>Preferiti</span><strong>${favoriteCount}</strong><small>brani salvati</small></article>
         <article class="home-stat-card"><span>Da studiare</span><strong>${toStudyCount}</strong><small>${recentCount} aggiunti di recente</small></article>
@@ -1803,14 +1830,6 @@ function renderDetail() {
     el.emptyDetail.classList.remove("hidden");
     el.detailContent.classList.add("hidden");
     if (el.visualizerLegend) el.visualizerLegend.innerHTML = "";
-    if (el.exportVisualizerSelectionBtn) {
-      el.exportVisualizerSelectionBtn.textContent = "Esporta strumenti selezionati";
-      el.exportVisualizerSelectionBtn.disabled = true;
-    }
-    if (el.exportVisualizerToPianoBtn) {
-      el.exportVisualizerToPianoBtn.disabled = true;
-      el.exportVisualizerToPianoBtn.classList.add("hidden");
-    }
     if (el.footerTrackTitle) el.footerTrackTitle.textContent = "Nessun brano";
     if (el.footerTrackArtist) el.footerTrackArtist.textContent = "-";
     return;
@@ -1823,25 +1842,55 @@ function renderDetail() {
   const loadedInstruments = state.player.loadedSongId === song.id ? state.player.trackOptions : [];
   const instruments = loadedInstruments.length ? loadedInstruments : instrumentsForSong(song).map((name) => ({ id: name, instrument: name }));
   const activeCount = activeInstrumentsForSong(song, instruments).length;
+  if (el.selectionSummary) {
+    const data = state.player.loadedSongId === song.id ? state.player.lastJsonData : null;
+    if (!data) el.selectionSummary.textContent = "Caricamento confronto tracce...";
+    else if (!activeCount) el.selectionSummary.textContent = `Originale: ${instruments.length} tracce. Selezione vuota.`;
+    else {
+      try {
+        const filtered = filterJsonByActiveInstruments(data, song, activeInstrumentsForSong(song, instruments));
+        const count = (hand) => (filtered.tracksV2?.[hand] || []).reduce((sum, measure) => sum + (measure.notes || []).length, 0);
+        el.selectionSummary.textContent = `Originale: ${instruments.length} tracce. Selezione: ${activeCount} tracce. Mani nel JSON: destra ${count("right")} note, sinistra ${count("left")} note.`;
+      } catch (error) { el.selectionSummary.textContent = `Anteprima non disponibile: ${error.message}`; }
+    }
+  }
+  const handOptions = loadedInstruments.filter((entry) => /^track:\d+$/.test(entry.id));
+  const canAssignHands = !song.variantType && handOptions.length > 0;
+  el.handAssignmentPanel.classList.toggle("hidden", !canAssignHands);
+  if (canAssignHands) {
+    const options = '<option value="auto">Automatica</option><option value="none">Nessuna traccia</option>' + handOptions.map((entry) =>
+      `<option value="${escapeHtml(entry.id)}">${escapeHtml(entry.instrument)} (traccia ${Number(entry.id.slice(6)) + 1})</option>`).join("");
+    for (const [select, hand] of [[el.rightHandTrack, "right"], [el.leftHandTrack, "left"]]) {
+      select.innerHTML = options;
+      const value = song.handAssignments?.[hand] || "auto";
+      if (![...select.options].some((option) => option.value === value)) {
+        select.add(new Option(`Traccia non disponibile: ${value}`, value));
+      }
+      select.value = value;
+    }
+    el.splitHandTrack.innerHTML = '<option value="none">Disattivata</option>' + handOptions.map((entry) =>
+      `<option value="${escapeHtml(entry.id)}">${escapeHtml(entry.instrument)} (traccia ${Number(entry.id.slice(6)) + 1})</option>`).join("");
+    const splitTrack = song.handAssignments?.splitTrack || "none";
+    if (![...el.splitHandTrack.options].some((option) => option.value === splitTrack)) el.splitHandTrack.add(new Option(`Traccia non disponibile: ${splitTrack}`, splitTrack));
+    el.splitHandTrack.value = splitTrack;
+    el.splitHandMidi.value = song.handAssignments?.splitMidi ?? 60;
+    el.splitHandMidi.disabled = splitTrack === "none";
+    el.rightHandTrack.disabled = splitTrack !== "none";
+    el.leftHandTrack.disabled = splitTrack !== "none";
+  }
 
   el.emptyDetail.classList.add("hidden");
   el.detailContent.classList.remove("hidden");
 
-  el.detailTitle.textContent = song.title || "Senza titolo";
+  el.detailTitle.textContent = titleWithoutArtist(song.title, song.artist) || "Senza titolo";
   el.detailSubtitle.textContent = `${song.artist || "Artista sconosciuto"} · ${song.composer || "Compositore n/d"}`;
   el.saveSelectedVersionBtn.classList.toggle("hidden", Boolean(song.variantType));
   el.selectedVersionNameLabel.classList.toggle("hidden", Boolean(song.variantType));
   el.saveSelectedVersionBtn.disabled = activeCount === 0;
   el.downloadOriginalMidiBtn.classList.toggle("hidden", Boolean(song.variantType));
   el.downloadOriginalMidiBtn.disabled = !song.midiAvailable;
-  if (el.exportVisualizerSelectionBtn) {
-    el.exportVisualizerSelectionBtn.textContent = `Esporta ${activeCount} ${activeCount === 1 ? "strumento" : "strumenti"}`;
-    el.exportVisualizerSelectionBtn.disabled = activeCount === 0;
-  }
-  if (el.exportVisualizerToPianoBtn) {
-    el.exportVisualizerToPianoBtn.disabled = activeCount === 0;
-    el.exportVisualizerToPianoBtn.classList.toggle("hidden", Boolean(song.variantType));
-  }
+  el.saveFaithfulPianoBtn.classList.toggle("hidden", Boolean(song.variantType));
+  el.saveFaithfulPianoBtn.disabled = !activeCount || !canAssignHands;
 
   el.detailMeta.innerHTML = [
     `<li><strong>Difficolta:</strong> ${escapeHtml(song.difficulty || "-")}</li>`,
@@ -1851,7 +1900,7 @@ function renderDetail() {
     `<li><strong>Durata:</strong> ${secondsToClock(song.duration || 0)}</li>`,
     `<li><strong>Tracce attive:</strong> ${activeCount} / ${instruments.length || 0}</li>`,
     `<li><strong>Strumenti:</strong> ${escapeHtml(instruments.map((entry) => entry.instrument).join(", ") || "-")}</li>`,
-    song.variantType === "piano_reduction" ? `<li class="piano-origin"><strong>Tipo:</strong> ${song.reductionMode === "piano_voice" ? "Piano + voce" : "Riduzione precedente · rigenerare"}</li>` : "",
+    song.variantType === "piano_reduction" ? `<li class="piano-origin"><strong>Tipo:</strong> ${song.reductionMode === "faithful" ? "Fedele alle tracce" : song.reductionMode === "piano_voice" ? "Piano + voce" : "Riduzione precedente · rigenerare"}</li>` : "",
     song.versionName ? `<li><strong>Versione:</strong> ${escapeHtml(song.versionName)}</li>` : "",
     song.derivedFromSongId ? `<li><strong>Originale:</strong> ${getSongById(song.derivedFromSongId) ? escapeHtml(getSongById(song.derivedFromSongId).title) : "Non più disponibile"}</li>` : "",
     `<li><strong>Tag:</strong> ${escapeHtml(tags.join(", ") || "-")}</li>`,
@@ -1876,7 +1925,7 @@ function renderDetail() {
   el.editStudyStatus.value = practice.studyStatus || "to_study";
   el.editPlaybackSpeed.value = Number(practice.playbackSpeed || 1);
   el.playerSpeedSelect.value = String(practice.playbackSpeed || 1);
-  if (el.footerTrackTitle) el.footerTrackTitle.textContent = song.title || "Senza titolo";
+  if (el.footerTrackTitle) el.footerTrackTitle.textContent = titleWithoutArtist(song.title, song.artist) || "Senza titolo";
   if (el.footerTrackArtist) el.footerTrackArtist.textContent = song.artist || song.composer || "-";
 }
 
@@ -1973,7 +2022,7 @@ async function createSelectedPianoReductions() {
   );
   const convertedSourceKeys = new Set();
   const existingSourceIds = new Set();
-  for (const reduction of (state.db?.songs || []).filter((song) => song.variantType === "piano_reduction")) {
+  for (const reduction of (state.db?.songs || []).filter((song) => song.variantType === "piano_reduction" && song.reductionMode !== "faithful")) {
     if (!reduction.derivedFromSongId) continue;
     existingSourceIds.add(reduction.derivedFromSongId);
     const source = completeSongsById.get(reduction.derivedFromSongId);
@@ -2059,7 +2108,7 @@ async function createSelectedPianoReductions() {
     toast(parts.join(" · "), errors.length > 0 ? "error" : "ok");
   } finally {
     if (el.convertSelectedPianoBtn) {
-      el.convertSelectedPianoBtn.textContent = "Converti selezionati in piano";
+      el.convertSelectedPianoBtn.textContent = "Converti per Piano";
     }
     showLoading(false);
     updateSelectionInfo();
@@ -2490,8 +2539,8 @@ async function buildBatchItemFromArrayBuffer({
   const fileHash = await sha256Hex(arrBuffer);
   const midi = new Midi(arrBuffer);
   const baseName = sourceName.replace(/\.(mid|midi)$/i, "");
-  const title = repairMojibake(titleOverride || el.metaTitle.value.trim() || baseName);
   const artist = repairMojibake(artistOverride || el.metaArtist.value.trim());
+  const title = titleWithoutArtist(repairMojibake(titleOverride || el.metaTitle.value.trim() || baseName), artist);
   const composer = repairMojibake(el.metaComposer.value.trim());
   const genre = repairMojibake(el.metaGenre.value.trim());
   const mergedTags = parseTagsInput(el.metaTags.value);
@@ -2821,6 +2870,31 @@ function downloadPreviewJson() {
 
 function filterJsonByActiveInstruments(jsonData, song, activeInstruments, includeAuditFields = false) {
   const activeSet = new Set((activeInstruments || []).map((x) => String(x || "").trim()).filter(Boolean));
+  if (song.variantType === "piano_reduction" && song.reductionMode === "faithful") {
+    if (!activeSet.has("hand:right") || !activeSet.has("hand:left")) throw new Error("Per esportare il piano fedele riattiva entrambe le mani: le tracce di accompagnamento restano nella versione salvata.");
+    return JSON.parse(JSON.stringify(jsonData));
+  }
+  if (song.variantType === "selected_instruments" && Number.isInteger(song.splitTrackIndex)) {
+    const index = song.splitTrackIndex;
+    const right = activeSet.has("hand:right");
+    const left = activeSet.has("hand:left");
+    const copy = JSON.parse(JSON.stringify(jsonData));
+    if ((right !== left) && copy.accompanyingTracks?.length) throw new Error("Esportazione di una sola mano non disponibile per questo formato di accompagnamento.");
+    const sourceTracks = copy.original?.tracks?.some((track) => track?.notes?.length) ? copy.original.tracks : copy.tracks;
+    if (right !== left && copy.supportingTracks?.length && copy.supportingTracks.length !== sourceTracks?.length) throw new Error("Impossibile associare le tracce di accompagnamento alle mani in questo formato.");
+    const keepNote = (note) => (Number(note.midi ?? note.note) >= song.splitMidi ? right : left);
+    for (const tracks of [copy.original?.tracks, copy.tracks, copy.supportingTracks]) {
+      if (Array.isArray(tracks) && tracks[index]?.notes) tracks[index].notes = tracks[index].notes.filter(keepNote);
+    }
+    const selected = [...activeSet].filter((id) => /^track:\d+$/.test(id));
+    if (right || left) selected.push(`track:${index}`);
+    if (!selected.length) throw new Error("Nessuno strumento attivo: impossibile esportare.");
+    const filtered = filterJsonByActiveInstruments(copy, { ...song, variantType: null, handAssignments: right || left
+      ? { right: "auto", left: "auto", splitTrack: `track:${index}`, splitMidi: song.splitMidi }
+      : { right: "none", left: "auto" } }, selected, includeAuditFields);
+    if (!right && !left) filtered.tracksV2 = { right: (filtered.tracksV2?.right || []).map((measure) => ({ ...measure, notes: [] })), left: (filtered.tracksV2?.left || []).map((measure) => ({ ...measure, notes: [] })) };
+    return filtered;
+  }
   const clone = JSON.parse(JSON.stringify(jsonData || {}));
   const originalTracks = Array.isArray(clone?.original?.tracks) ? clone.original.tracks : [];
   const topLevelTracks = Array.isArray(clone?.tracks) ? clone.tracks : [];
@@ -2848,7 +2922,29 @@ function filterJsonByActiveInstruments(jsonData, song, activeInstruments, includ
   const sourceIdPrefix = sourceTracks === supportingTracks ? "support" : "track";
   const keepIdx = sourceTracks.flatMap((_, idx) => activeSet.has(`${sourceIdPrefix}:${idx}`) ? [idx] : []);
   if (keepIdx.length === 0) throw new Error("Nessuna traccia attiva: impossibile esportare.");
-  if (keepIdx.length === sourceTracks.length && !includeAuditFields) return clone;
+  const handAssignments = song.handAssignments || { right: "auto", left: "auto" };
+  const splitEnabled = Boolean(handAssignments.splitTrack && handAssignments.splitTrack !== "none");
+  const manualHands = splitEnabled || handAssignments.right !== "auto" || handAssignments.left !== "auto";
+  if (manualHands && sourceTracks !== originalTracks && sourceTracks !== topLevelTracks) throw new Error("Assegnazione mani non disponibile: le tracce originali non sono presenti.");
+  const remapHand = (value) => {
+    if (value === "auto" || value === "none") return value;
+    if (!/^track:\d+$/.test(value)) throw new Error("Assegnazione mano non valida.");
+    const index = keepIdx.indexOf(Number(value.slice(6)));
+    if (index < 0) throw new Error("Una traccia assegnata a una mano non e selezionata. Riattivala o cambia assegnazione.");
+    return index;
+  };
+  const mappedHands = splitEnabled
+    ? { splitTrack: remapHand(handAssignments.splitTrack), splitMidi: handAssignments.splitMidi }
+    : manualHands ? { right: remapHand(handAssignments.right), left: remapHand(handAssignments.left) } : null;
+  if (splitEnabled && (!Number.isInteger(mappedHands.splitMidi) || mappedHands.splitMidi < 1 || mappedHands.splitMidi > 127)) throw new Error("Punto di divisione MIDI non valido.");
+  if (!splitEnabled && mappedHands?.right === "none" && mappedHands?.left === "none") throw new Error("Assegna almeno una mano.");
+  if (!splitEnabled && mappedHands && typeof mappedHands.right === "number" && mappedHands.right === mappedHands.left) throw new Error("Scegli tracce diverse per le due mani.");
+  if (manualHands && (!Array.isArray(clone.measures) || !clone.measures.length ||
+      clone.measures.some((measure) => !Number.isFinite(measure?.ticksStart) || !Number.isFinite(measure?.totalTicks)) ||
+      keepIdx.some((index) => (sourceTracks[index]?.notes || []).some((note) => !Number.isFinite(note.ticks))))) {
+    throw new Error("Impossibile assegnare le mani: misure o tempi MIDI mancanti.");
+  }
+  if (keepIdx.length === sourceTracks.length && !includeAuditFields && !manualHands) return clone;
   const selected = new Set(keepIdx);
   const pick = (items) => keepIdx.map((idx) => items[idx]).filter((item) => item !== undefined);
 
@@ -2891,6 +2987,7 @@ function filterJsonByActiveInstruments(jsonData, song, activeInstruments, includ
       clone.measures,
       Number(clone.resolution || 480),
       Array.isArray(clone.tempos) && clone.tempos.length ? clone.tempos : [{ ticks: 0, bpm: 120 }],
+      mappedHands,
     );
   } else if (clone.tracksV2 && typeof clone.tracksV2 === "object") {
     clone.tracksV2 = { right: [], left: [] };
@@ -2915,7 +3012,7 @@ function filterJsonByActiveInstruments(jsonData, song, activeInstruments, includ
 function jsonWithSongMetadata(jsonData, song) {
   return {
     ...jsonData,
-    name: song.title || jsonData.name || "",
+    name: titleWithoutArtist(song.title || jsonData.name || "", song.artist),
     artist: song.artist || jsonData.artist || "",
     composer: song.composer || jsonData.composer || "",
     genre: song.genre || jsonData.genre || "",
@@ -2936,9 +3033,14 @@ async function saveSelectedVersion() {
     const active = activeInstrumentsForSong(song, options);
     if (!active.length) throw new Error("Seleziona almeno una traccia");
     const filtered = jsonWithSongMetadata(filterJsonByActiveInstruments(jsonData, song, active), song);
+    if (!confirmCompatibleExport(filtered)) return;
+    const splitTrack = song.handAssignments?.splitTrack;
+    const splitIndex = /^track:\d+$/.test(splitTrack || "")
+      ? active.filter((id) => /^track:\d+$/.test(id)).map((id) => Number(id.slice(6))).sort((a, b) => a - b).indexOf(Number(splitTrack.slice(6))) : -1;
     const result = await api("/api/selected-versions/create", {
       method: "POST",
       body: JSON.stringify({ songId: song.id, versionName: versionName.trim(), jsonData: filtered,
+        ...(splitIndex >= 0 ? { splitTrackIndex: splitIndex, splitMidi: song.handAssignments.splitMidi } : {}),
         instruments: options.filter((entry) => active.includes(entry.id)).map((entry) => entry.instrument) }),
     });
     await refreshDb();
@@ -2964,6 +3066,83 @@ async function downloadOriginalMidi() {
   } catch (error) { toast(error.message, "error"); }
 }
 
+async function saveFaithfulPiano() {
+  const song = getSongById(state.selectedSongId);
+  if (!song || song.variantType) return;
+  const hands = song.handAssignments || {};
+  const split = hands.splitTrack && hands.splitTrack !== "none";
+  if (!split && (!hands.right || !hands.left || hands.right === "auto" || hands.left === "auto")) {
+    toast("Scegli le tracce per entrambe le mani o attiva Dividi traccia.", "error");
+    return;
+  }
+  const name = el.selectedVersionName.value;
+  if (!name.trim()) { toast("Inserisci un nome per la versione", "error"); return; }
+  showLoading(true);
+  try {
+    const response = await fetch(song.jsonPath);
+    if (!response.ok) throw new Error("Impossibile leggere il JSON del brano");
+    const data = await response.json();
+    const options = trackOptionsFromJson(data, song);
+    const active = activeInstrumentsForSong(song, options);
+    const filtered = jsonWithSongMetadata(filterJsonByActiveInstruments(data, song, active), song);
+    if (!confirmCompatibleExport(filtered)) return;
+    const result = await api("/api/piano-reduction/faithful", { method: "POST", body: JSON.stringify({
+      songId: song.id, versionName: name.trim(), sourceJson: filtered,
+      selectedInstruments: options.filter((entry) => active.includes(entry.id)).map((entry) => entry.instrument),
+    }) });
+    await refreshDb();
+    el.selectedVersionName.value = "";
+    state.selectedSongId = result.song.id;
+    state.player.loadedSongId = "";
+    selectNav("reductions");
+    await loadSelectedSongForPlayer();
+    renderDetail();
+    drawVisualizerFrame();
+    toast("Piano fedele salvato in Riduzioni pianistiche", "ok");
+  } catch (error) { toast(`Piano fedele non salvato: ${error.message}`, "error"); }
+  finally { showLoading(false); }
+}
+
+async function saveHandAssignments() {
+  const song = getSongById(state.selectedSongId);
+  if (!song || song.variantType) return;
+  const hands = { right: el.rightHandTrack.value, left: el.leftHandTrack.value,
+    splitTrack: el.splitHandTrack.value, splitMidi: Number(el.splitHandMidi.value) };
+  if (!Number.isInteger(hands.splitMidi) || hands.splitMidi < 1 || hands.splitMidi > 127) {
+    el.handAssignmentStatus.textContent = "Inserisci una nota MIDI tra 1 e 127.";
+    return;
+  }
+  if (hands.splitTrack === "none" && ((hands.right === hands.left && !["auto", "none"].includes(hands.right)) || (hands.right === "none" && hands.left === "none"))) {
+    renderDetail();
+    el.handAssignmentStatus.textContent = "Scegli tracce diverse e almeno una mano.";
+    return;
+  }
+  el.rightHandTrack.disabled = true;
+  el.leftHandTrack.disabled = true;
+  el.splitHandTrack.disabled = true;
+  el.splitHandMidi.disabled = true;
+  try {
+    await api(`/api/songs/${song.id}`, { method: "PUT", body: JSON.stringify({ song: { handAssignments: hands } }) });
+    song.handAssignments = hands;
+    if (state.selectedSongId === song.id) { renderDetail(); el.handAssignmentStatus.textContent = "Assegnazione salvata"; }
+  } catch (error) {
+    if (state.selectedSongId === song.id) { renderDetail(); el.handAssignmentStatus.textContent = error.message; }
+  } finally {
+    el.splitHandTrack.disabled = false;
+    const splitting = el.splitHandTrack.value !== "none";
+    el.rightHandTrack.disabled = splitting;
+    el.leftHandTrack.disabled = splitting;
+    el.splitHandMidi.disabled = !splitting;
+  }
+}
+
+function confirmCompatibleExport(jsonData) {
+  const result = inspectPianoVisionJson(jsonData);
+  if (result.errors.length) throw new Error(`JSON non esportato: ${result.errors.join(" ")}`);
+  if (result.warnings.length && !confirm(`Controllo JSON: ${result.warnings.join(" ")}\n\nContinuare comunque?`)) return false;
+  return true;
+}
+
 async function exportFilteredSongJson() {
   const song = getSongById(state.selectedSongId);
   if (!song) {
@@ -2980,6 +3159,7 @@ async function exportFilteredSongJson() {
     const active = activeInstrumentsForSong(song, all);
     if (active.length === 0) throw new Error("Nessuno strumento attivo da esportare");
     const filtered = jsonWithSongMetadata(filterJsonByActiveInstruments(jsonData, song, active), song);
+    if (!confirmCompatibleExport(filtered)) return;
     const fileName = `${sanitizeFileName(song.title || song.id || "song")}.json`;
     const blob = new Blob([JSON.stringify(filtered, null, 2)], { type: "application/json" });
     downloadBlob(blob, fileName);
@@ -2987,60 +3167,6 @@ async function exportFilteredSongJson() {
   } catch (error) {
     toast(error.message, "error");
   } finally {
-    showLoading(false);
-  }
-}
-
-async function exportVisualizerSelectionToPiano() {
-  const song = getSongById(state.selectedSongId);
-  if (!song || song.variantType === "piano_reduction") {
-    toast("Seleziona un brano completo", "error");
-    return;
-  }
-  let jsonData;
-  try {
-    const response = await fetch(song.jsonPath);
-    if (!response.ok) throw new Error("Impossibile leggere il JSON del brano");
-    jsonData = await response.json();
-  } catch (error) {
-    toast(error.message, "error");
-    return;
-  }
-  const options = trackOptionsFromJson(jsonData, song);
-  const active = activeInstrumentsForSong(song, options);
-  if (active.length === 0) {
-    toast("Nessuno strumento attivo da esportare", "error");
-    return;
-  }
-
-  const existing = (state.db?.songs || []).find(
-    (item) => item.variantType === "piano_reduction" && item.derivedFromSongId === song.id,
-  );
-  const replaceMessage = existing ? "\n\nLa riduzione piano esistente verrà sostituita." : "";
-  if (!confirm(`Creare la riduzione Piano + voce usando ${active.length} ${active.length === 1 ? "traccia selezionata" : "tracce selezionate"}?${replaceMessage}`)) return;
-
-  showLoading(true);
-  if (el.exportVisualizerToPianoBtn) el.exportVisualizerToPianoBtn.disabled = true;
-  try {
-    const filtered = jsonWithSongMetadata(filterJsonByActiveInstruments(jsonData, song, active, false), song);
-    const result = await api("/api/piano-reduction/create", {
-      method: "POST",
-      body: JSON.stringify({
-        songId: song.id,
-        sourceJson: filtered,
-        selectedInstruments: options.filter((entry) => active.includes(entry.id)).map((entry) => entry.instrument),
-        replaceExisting: Boolean(existing),
-      }),
-    });
-    await refreshDb();
-    if (state.player.loadedSongId === result.song.id) state.player.loadedSongId = "";
-    state.selectedSongId = result.song.id;
-    selectNav("reductions");
-    toast(`Esportato su Piano con ${active.length} ${active.length === 1 ? "traccia" : "tracce"}`, "ok");
-  } catch (error) {
-    toast(`Esportazione su Piano fallita: ${error.message}`, "error");
-  } finally {
-    if (el.exportVisualizerToPianoBtn) el.exportVisualizerToPianoBtn.disabled = false;
     showLoading(false);
   }
 }
@@ -3319,9 +3445,9 @@ async function inspectSelectedCompatibility() {
     if (!response.ok) throw new Error("JSON del brano non disponibile");
     const result = inspectPianoVisionJson(await response.json());
     if (state.selectedSongId !== song.id) return;
-    const summary = `${result.trackCount} tracce di accompagnamento, ${result.measureCount} misure.`;
+    const summary = `${result.trackCount} tracce, ${result.noteCount} note, ${result.measureCount} misure, ${result.tempoCount} tempi.`;
     el.compatibilityResult.textContent = result.issues.length
-      ? `${summary} Da verificare: ${result.issues.join(" ")}`
+      ? `${summary} ${result.errors.length ? `Errori: ${result.errors.join(" ")} ` : ""}${result.warnings.length ? `Da verificare: ${result.warnings.join(" ")}` : ""}`
       : `${summary} Nessuna anomalia rilevata nei controlli disponibili.`;
   } catch (error) { el.compatibilityResult.textContent = error.message; }
   finally { el.inspectCompatibilityBtn.disabled = false; }
@@ -3417,6 +3543,7 @@ function extractPianoReductionTracks(jsonData, song = null) {
   const pianoHands = hands
     .map(({ key, instrument }) => {
       const trackId = `hand:${key}`;
+      if (song?.reductionMode === "faithful") instrument = key === "right" ? "Mano destra" : "Mano sinistra";
       const notes = (jsonData?.tracksV2?.[key] || []).flatMap((measure) =>
         (measure?.notes || []).map((note) => ({
           midi: Number(note.note ?? note.midi ?? 60),
@@ -3435,6 +3562,11 @@ function extractPianoReductionTracks(jsonData, song = null) {
 
 function extractPlayableTracks(jsonData, fallbackInstruments = [], song = null) {
   if (song?.variantType === "piano_reduction") return extractPianoReductionTracks(jsonData, song);
+  if (song?.variantType === "selected_instruments" && Number.isInteger(song.splitTrackIndex)) {
+    const hands = extractPianoReductionTracks(jsonData).map((group) => ({ ...group, instrument: group.id === "hand:right" ? "Mano destra" : "Mano sinistra" }));
+    const others = extractPlayableTracks(jsonData, fallbackInstruments, null).filter((group) => group.id !== `track:${song.splitTrackIndex}`);
+    return [...hands, ...others];
+  }
   const originalTracks = Array.isArray(jsonData?.original?.tracks) ? jsonData.original.tracks : [];
   const topLevelTracks = Array.isArray(jsonData?.tracks) ? jsonData.tracks : [];
   const supportingTracks = Array.isArray(jsonData?.supportingTracks) ? jsonData.supportingTracks : [];
@@ -3883,6 +4015,7 @@ async function onTableClick(event) {
   if (!tr) return;
   state.selectedSongId = tr.dataset.songId;
   el.compatibilityResult.textContent = "";
+  el.handAssignmentStatus.textContent = "";
   state.player.loadedSongId = "";
   state.player.notes = [];
   state.player.trackOptions = [];
@@ -3950,7 +4083,7 @@ function updateSelectionInfo() {
     el.convertSelectedPianoBtn.disabled = pianoEligibleCount === 0;
     el.convertSelectedPianoBtn.textContent = pianoEligibleCount > 0
       ? `Converti in piano (${pianoEligibleCount})`
-      : "Converti selezionati in piano";
+      : "Converti per Piano";
   }
   if (el.exportSelectedFilteredBtn) {
     el.exportSelectedFilteredBtn.disabled = pianoEligibleCount === 0;
@@ -4022,6 +4155,7 @@ async function exportSelectedFilteredJson() {
   const zip = new JSZip();
   const folder = zip.folder("json");
   const errors = [];
+  const warnings = [];
   let exported = 0;
   showLoading(true);
   el.exportSelectedFilteredBtn.disabled = true;
@@ -4036,6 +4170,9 @@ async function exportSelectedFilteredJson() {
         const active = activeInstrumentsForSong(song, all);
         if (active.length === 0) throw new Error("Nessuno strumento attivo");
         const filtered = jsonWithSongMetadata(filterJsonByActiveInstruments(jsonData, song, active), song);
+        const report = inspectPianoVisionJson(filtered);
+        if (report.errors.length) throw new Error(report.errors.join(" "));
+        if (report.warnings.length) warnings.push(`${song.title || song.id}: ${report.warnings.join(" ")}`);
         const fileName = fileNames[index];
         const entryPath = counts.get(fileName.toLowerCase()) > 1 ? `${song.id}/${fileName}` : fileName;
         folder.file(entryPath, JSON.stringify(filtered, null, 2));
@@ -4045,6 +4182,7 @@ async function exportSelectedFilteredJson() {
       }
     }
     if (exported === 0) throw new Error(`Nessun JSON esportato. ${errors.slice(0, 2).join("; ")}`);
+    if (warnings.length && !confirm(`${warnings.length} brani presentano avvisi:\n${warnings.slice(0, 3).join("\n")}\n\nContinuare con l'esportazione?`)) return;
     const blob = await zip.generateAsync({ type: "blob" });
     downloadBlob(blob, "pianovisual-json-selezionati.zip");
     toast(`${exported} JSON filtrati esportati${errors.length ? `, ${errors.length} non esportati` : ""}`, errors.length ? "error" : "ok");
@@ -4357,24 +4495,23 @@ async function pushJsonToQuest() {
   try {
     const preview = await window.pianovisualDesktop.questPreviewPush();
     const files = Array.isArray(preview?.files) ? preview.files : [];
-    const toCopy = files.filter((item) => item.status === "new" || item.status === "changed");
     const summary = preview?.summary || { new: 0, changed: 0, same: 0 };
-    if (toCopy.length === 0) {
-      setQuestStatus(`Quest già aggiornato · ${summary.same || 0} file uguali`, "ok");
+    if (!files.length) {
+      setQuestStatus("Nessun JSON disponibile nella libreria.");
       return;
     }
-    const approved = confirm(
-      `Sincronizzare ${toCopy.length} JSON verso il Quest?\n\n` +
-        `Nuovi: ${summary.new || 0}\nModificati: ${summary.changed || 0}\nGià uguali: ${summary.same || 0}\n\n` +
-        "I file omonimi modificati saranno sovrascritti. Nessun file verrà eliminato.",
-    );
-    if (!approved) {
+    showLoading(false);
+    const toCopy = await chooseQuestFiles(files, summary);
+    if (!toCopy.length) {
       setQuestStatus("Invio annullato dopo l'anteprima.");
       return;
     }
-    const result = await window.pianovisualDesktop.questPushJson(toCopy.map((item) => item.fileName));
+    const changed = toCopy.filter((item) => item.status === "changed").length;
+    if (changed && !confirm(`${changed} file presenti sul Quest saranno sovrascritti. Continuare?`)) return;
+    showLoading(true);
+    const result = await window.pianovisualDesktop.questPushJson(toCopy.map(({ id, localHash, remoteHash }) => ({ id, localHash, remoteHash })));
     const failures = Array.isArray(result?.errors) ? result.errors.length : 0;
-    setQuestStatus(`${result.copied || 0} JSON inviati al Quest${failures ? ` · ${failures} errori` : ""}.`, failures ? "error" : "ok");
+    setQuestStatus(`${result.copied || 0} JSON verificati sul Quest${failures ? ` · ${failures} errori: ${result.errors.map((item) => `${item.fileName}: ${item.error}`).join("; ")}` : ""}.`, failures ? "error" : "ok");
     toast(`Sincronizzazione Quest: ${result.copied || 0} file copiati`, failures ? "error" : "ok");
   } catch (error) {
     setQuestStatus(error.message, "error");
@@ -4771,13 +4908,16 @@ function bindEvents() {
 
   el.saveMetadataBtn.addEventListener("click", saveMetadata);
   el.inspectCompatibilityBtn.addEventListener("click", inspectSelectedCompatibility);
+  el.rightHandTrack.addEventListener("change", saveHandAssignments);
+  el.leftHandTrack.addEventListener("change", saveHandAssignments);
+  el.splitHandTrack.addEventListener("change", saveHandAssignments);
+  el.splitHandMidi.addEventListener("change", saveHandAssignments);
   el.deleteSongBtn.addEventListener("click", deleteSongSelected);
   el.toggleFavoriteBtn.addEventListener("click", toggleFavoriteSelected);
   el.exportFilteredJsonBtn.addEventListener("click", exportFilteredSongJson);
-  el.exportVisualizerSelectionBtn.addEventListener("click", exportFilteredSongJson);
   el.saveSelectedVersionBtn.addEventListener("click", saveSelectedVersion);
   el.downloadOriginalMidiBtn.addEventListener("click", downloadOriginalMidi);
-  el.exportVisualizerToPianoBtn.addEventListener("click", exportVisualizerSelectionToPiano);
+  el.saveFaithfulPianoBtn.addEventListener("click", saveFaithfulPiano);
   el.addToPlaylistBtn.addEventListener("click", addSelectedToPlaylist);
 
   el.renamePlaylistBtn.addEventListener("click", managePlaylist);
@@ -4861,6 +5001,30 @@ async function bootstrap() {
   await refreshDb();
   render();
   if (window.pianovisualDesktop?.questStatus) void checkQuestStatus();
+}
+
+function chooseQuestFiles(files, summary) {
+  return new Promise((resolve) => {
+    const dialog = document.createElement("dialog");
+    dialog.className = "quest-file-dialog";
+    const categories = { json: "Brani JSON", jsonpiano: "Riduzioni pianistiche", jsonselected: "Strumenti selezionati" };
+    const statuses = { new: "Nuovo", changed: "Da sovrascrivere", same: "Uguale" };
+    dialog.innerHTML = `<h2>Invia JSON al Quest</h2><p>Nuovi: ${summary.new || 0} · Modificati: ${summary.changed || 0} · Uguali: ${summary.same || 0}</p><div class="quest-file-list">${files.map((item, index) => `<label><input type="checkbox" value="${index}"><span>${escapeHtml(item.fileName)}<small>${escapeHtml(categories[item.directoryName] || item.directoryName)} · ${escapeHtml(statuses[item.status] || item.status)}</small></span></label>`).join("")}</div><p class="quest-selection-error" role="alert"></p><div class="quest-file-actions"><button type="button" data-action="new">Seleziona nuovi</button><button type="button" data-action="cancel">Annulla</button><button type="button" data-action="send">Invia selezionati</button></div>`;
+    document.body.appendChild(dialog);
+    const close = (selection) => { dialog.close(); dialog.remove(); resolve(selection); };
+    dialog.addEventListener("cancel", (event) => { event.preventDefault(); close([]); });
+    dialog.querySelector('[data-action="cancel"]').onclick = () => close([]);
+    dialog.querySelector('[data-action="new"]').onclick = () => dialog.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = files[Number(input.value)].status === "new"; });
+    dialog.querySelector('[data-action="send"]').onclick = () => {
+      const selection = [...dialog.querySelectorAll('input:checked')].map((input) => files[Number(input.value)]);
+      const names = selection.map((item) => item.fileName.toLowerCase());
+      const error = dialog.querySelector(".quest-selection-error");
+      if (!selection.length) { error.textContent = "Seleziona almeno un file."; return; }
+      if (new Set(names).size !== names.length) { error.textContent = "Seleziona una sola versione per ogni nome di file."; return; }
+      close(selection);
+    };
+    dialog.showModal();
+  });
 }
 
 async function createFullBackup() {

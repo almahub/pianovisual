@@ -1,6 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { inferArtist } from "../artist-inference.js";
+import { inferArtist, titleWithoutArtist } from "../artist-inference.js";
+
+test("rimuove solo prefissi riconducibili all'artista noto", () => {
+  assert.equal(titleWithoutArtist("Capossela - Zampano", "Vinicio Capossela"), "Zampano");
+  assert.equal(titleWithoutArtist("Vinicio Capossela - Zampano", "Vinicio Capossela"), "Zampano");
+  assert.equal(titleWithoutArtist("Another Artist - Song", "Vinicio Capossela"), "Another Artist - Song");
+  assert.equal(titleWithoutArtist("Capossela - Zampano", ""), "Capossela - Zampano");
+});
 
 test("riconosce artista esplicito nel nome e nelle varianti", () => {
   assert.equal(inferArtist({ title: "Capossela - Pena Del Alma" }), "Vinicio Capossela");

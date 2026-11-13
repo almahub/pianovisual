@@ -160,7 +160,7 @@
                 </div>
                 <div id="libraryToolbar" class="section-actions hidden">
                   <button id="selectVisibleBtn" class="btn subtle" type="button">Seleziona visibili</button>
-                  <button id="convertSelectedPianoBtn" class="btn piano-btn" type="button" disabled>Converti selezionati in piano</button>
+                  <button id="convertSelectedPianoBtn" class="btn piano-btn" type="button" disabled>Converti per Piano</button>
                   <button id="exportSelectedFilteredBtn" class="btn" type="button" disabled>Esporta JSON filtrati</button>
                   <button id="deleteSelectedBtn" class="btn subtle danger" type="button" disabled>Elimina selezionati</button>
                   <details class="toolbar-menu">
@@ -473,12 +473,21 @@
                   <canvas id="visualizerCanvas" width="520" height="220"></canvas>
                   <div class="visualizer-controls">
                     <div id="visualizerLegend" class="visualizer-legend" aria-label="Strumenti attivi"></div>
+                    <p id="selectionSummary" class="mini-note" aria-live="polite"></p>
+                    <div id="handAssignmentPanel" class="hand-assignment hidden" aria-label="Mani nel JSON filtrato">
+                      <span class="hand-assignment-heading">Mani nel JSON filtrato</span>
+                      <label>Mano destra <select id="rightHandTrack"></select></label>
+                      <label>Mano sinistra <select id="leftHandTrack"></select></label>
+                      <label>Dividi traccia <select id="splitHandTrack"></select></label>
+                      <label>Punto di divisione MIDI <input id="splitHandMidi" type="number" min="1" max="127" value="60" /></label>
+                      <span class="mini-note">La nota scelta e quelle superiori vanno a destra; le altre a sinistra.</span>
+                      <span id="handAssignmentStatus" class="mini-note" aria-live="polite"></span>
+                    </div>
                     <div class="viz-export-actions">
-                      <button id="exportVisualizerSelectionBtn" class="btn subtle viz-export-btn" type="button">Esporta strumenti selezionati</button>
                       <label id="selectedVersionNameLabel">Nome versione <input id="selectedVersionName" type="text" maxlength="120" placeholder="Es. Piano e archi" /></label>
                       <button id="saveSelectedVersionBtn" class="btn subtle viz-export-btn" type="button">Salva versione selezionata</button>
+                      <button id="saveFaithfulPianoBtn" class="btn subtle viz-export-btn" type="button">Salva Piano</button>
                       <button id="downloadOriginalMidiBtn" class="btn subtle viz-export-btn" type="button">Scarica MIDI originale</button>
-                      <button id="exportVisualizerToPianoBtn" class="btn piano-btn viz-export-btn" type="button">Esporta su Piano</button>
                     </div>
                   </div>
                 </details>

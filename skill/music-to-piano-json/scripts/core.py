@@ -193,7 +193,8 @@ def track_features(tr):
     bass_hint=1 if 'bass' in name else 0
     mono=1-overlaps; reg=clamp((mean-52)/28,0,1); low=clamp((60-mean)/24,0,1)
     density_score=min(1,count/100); role_penalty=(.28 if bass_hint else 0)+(.12 if 'guitar' in name else 0)+(.20 if count<32 else 0)
-    melody=.30*mono+.15*reg+.20*continuity+.15*density_score+.10*melody_hint+.10*(1-overlaps)-role_penalty
+    low_register_penalty=.30*clamp((52-mean)/12,0,1)
+    melody=.30*mono+.15*reg+.20*continuity+.15*density_score+.10*melody_hint+.10*(1-overlaps)-role_penalty-low_register_penalty
     if percussion:melody=0
     return {'melody':clamp(melody,0,1),
       'bass':0 if percussion else .35*low+.25*mono+.20*bass_hint+.20*(1-overlaps),
@@ -340,6 +341,16 @@ def _align_bass_to_chords(notes,chords):
               'confidence':min(float(source.get('confidence',1)),float(chord['confidence']))});aligned.append(n)
     return sorted(aligned,key=lambda n:(n['time'],n['midi']))
 
+def _monophonic_bass(notes):
+    selected=[]
+    for note in sorted(notes,key=lambda n:(n['time'],n['midi'])):
+        current=dict(note)
+        if selected and abs(current['time']-selected[-1]['time'])<1e-6:continue
+        if selected and selected[-1]['time']+selected[-1]['duration']>current['time']:
+            selected[-1]['duration']=round(current['time']-selected[-1]['time'],6)
+        selected.append(current)
+    return selected
+
 def reduce(tracks,info,chords=None,classification=None):
     mi,hi,bi,fs=classification or classify(tracks); melody=[dict(n) for n in tracks[mi]['notes']]
     # A reduction must remain playable: use the strongest harmonic source instead
@@ -352,7 +363,7 @@ def reduce(tracks,info,chords=None,classification=None):
     if chords and (source_h or source_b):
         harmony,bass=_easy_left_hand(chords)
     else:
-        harmony=[];bass=_align_bass_to_chords(source_b,[])
+        harmony=[];bass=_monophonic_bass(_align_bass_to_chords(source_b,[]))
     return [
       {'id':'melody','name':'Voce / Melodia','role':'melody','hand':'right','instrument':'voice','sourceTrackIndex':tracks[mi].get('sourceTrackIndex',mi),'confidence':round(fs[mi]['melody'],3),'notes':melody},
       {'id':'harmony','name':'Accordi mano sinistra','role':'harmony','hand':'left','instrument':'piano','sourceTrackIndex':tracks[hi].get('sourceTrackIndex',hi),'confidence':round(fs[hi]['harmony'],3),'notes':harmony},
@@ -426,7 +437,7 @@ def validate(d):
         if any(b-a<2 for a,b in zip(pitches,pitches[1:])):errors.append('left-hand adjacent notes are not playable')
     events=[]
     for note in harmony_track['notes']+bass_track['notes']:
-        events.extend(((note['time'],1),(note['time']+note['duration'],-1)))
+        events.extend(((round(note['time']*1000000),1),(round((note['time']+note['duration'])*1000000),-1)))
     active=0
     for _,kind in sorted(events):
         active+=kind

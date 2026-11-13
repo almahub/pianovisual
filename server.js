@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { inferArtist } from "./artist-inference.js";
+import { inferArtist, titleWithoutArtist } from "./artist-inference.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -174,14 +174,16 @@ async function readDb() {
     }
     const fileName = path.basename(String(song.jsonPath || song.sourceFileName || ""));
     if (!fileName) continue;
+    if (String(song.jsonPath || "").startsWith("/library/jsonpiano/")) continue;
     const oldPath = path.join(JSON_DIR, fileName);
+    const sharedSource = db.songs.some((item) => item.id !== song.id && item.jsonPath === `/library/json/${fileName}`);
     let targetName = fileName;
     let targetPath = path.join(PIANO_JSON_DIR, targetName);
     if (await pathExists(oldPath)) {
       if (await pathExists(targetPath)) {
         const oldHash = hashBuffer(await fs.readFile(oldPath));
         const targetHash = hashBuffer(await fs.readFile(targetPath));
-        if (oldHash === targetHash) await fs.rm(oldPath, { force: true });
+        if (oldHash === targetHash) { if (!sharedSource) await fs.rm(oldPath, { force: true }); }
         else {
           const base = path.basename(fileName, ".json");
           let seq = 2;
@@ -190,10 +192,12 @@ async function readDb() {
             targetPath = path.join(PIANO_JSON_DIR, targetName);
             seq += 1;
           } while (await pathExists(targetPath));
-          await fs.rename(oldPath, targetPath);
+          if (sharedSource) await fs.copyFile(oldPath, targetPath);
+          else await fs.rename(oldPath, targetPath);
         }
       } else {
-        await fs.rename(oldPath, targetPath);
+        if (sharedSource) await fs.copyFile(oldPath, targetPath);
+        else await fs.rename(oldPath, targetPath);
       }
       changed = true;
     }
@@ -208,6 +212,8 @@ async function readDb() {
   for (const song of db.songs) {
     const midiFile = songMidiAbsolutePath(song);
     song.midiAvailable = Boolean(midiFile && await pathExists(midiFile));
+    try { song.jsonAvailable = await pathExists(songJsonAbsolutePath(song)); }
+    catch { song.jsonAvailable = false; }
   }
   return db;
 }
@@ -555,6 +561,7 @@ function applySongPatch(song, patch) {
     "composer",
     "genre",
     "imageUrl",
+    "handAssignments",
     "difficulty",
     "key",
     "bpm",
@@ -950,6 +957,12 @@ async function handleApi(req, res, url) {
     }
     const versionName = String(payload.versionName || "").trim().slice(0, 120);
     const validation = validatePianoVisionJsonData(payload.jsonData);
+    if (payload.splitTrackIndex !== undefined && (!Number.isInteger(payload.splitTrackIndex) || payload.splitTrackIndex < 0 ||
+        !Number.isInteger(payload.splitMidi) || payload.splitMidi < 1 || payload.splitMidi > 127 ||
+        !(payload.jsonData?.original?.tracks?.[payload.splitTrackIndex] || payload.jsonData?.tracks?.[payload.splitTrackIndex]))) {
+      sendJson(res, 400, { error: "Divisione della traccia non valida" });
+      return true;
+    }
     if (!versionName || !validation.ok) {
       sendJson(res, 400, { error: !versionName ? "Nome versione richiesto" : `JSON non valido: ${validation.errors.join(", ")}` });
       return true;
@@ -957,21 +970,58 @@ async function handleApi(req, res, url) {
     const id = uid("selected");
     const fileName = `${id}.json`;
     const data = structuredClone(payload.jsonData);
-    data.name = source.title || "Senza titolo";
+    data.name = titleWithoutArtist(source.title, source.artist) || "Senza titolo";
     data.artist = source.artist || "";
     await writeJsonAtomic(path.join(SELECTED_JSON_DIR, fileName), data);
     const hash = hashJsonData(data);
     const song = {
-      id, title: source.title, artist: source.artist, composer: source.composer,
+      id, title: titleWithoutArtist(source.title, source.artist), artist: source.artist, composer: source.composer,
       imageUrl: safeImageUrl(source.imageUrl),
       genre: source.genre, difficulty: source.difficulty, key: source.key, bpm: source.bpm,
       duration: Number(data.song_length || 0), instruments: Array.isArray(payload.instruments) ? payload.instruments.slice(0, 128).map(String) : [],
       importedAt: nowIso(), updatedAt: nowIso(), fileHash: hash, jsonContentHash: hash,
       sourceFileName: fileName, jsonPath: `/library/jsonselected/${fileName}`, midiPath: "",
       variantType: "selected_instruments", derivedFromSongId: source.id, versionName,
+      ...(payload.splitTrackIndex !== undefined ? { splitTrackIndex: payload.splitTrackIndex, splitMidi: payload.splitMidi } : {}),
     };
     db.songs.push(song);
     db.practiceMeta.push({ songId: id, lastPracticePointSec: 0, playbackSpeed: 1, favoriteLoops: [], studyStatus: "to_study" });
+    await writeDb(db);
+    sendJson(res, 200, { song });
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/piano-reduction/faithful") {
+    const payload = await readBodyJson(req);
+    const db = await readDb();
+    const source = songById(db, String(payload.songId || ""));
+    const name = String(payload.versionName || "").trim().slice(0, 120);
+    const validation = validatePianoVisionJsonData(payload.sourceJson);
+    const hands = payload.sourceJson?.tracksV2;
+    const notes = ["right", "left"].reduce((count, key) => count + (Array.isArray(hands?.[key]) ? hands[key].reduce((sum, measure) => sum + (Array.isArray(measure?.notes) ? measure.notes.length : 0), 0) : 0), 0);
+    if (!source || source.variantType || !name || !validation.ok || !notes) {
+      sendJson(res, 400, { error: "Sorgente, nome o tracce delle mani non validi" });
+      return true;
+    }
+    const id = uid("piano");
+    const fileName = `${id}.json`;
+    const data = structuredClone(payload.sourceJson);
+    data.name = titleWithoutArtist(source.title, source.artist) || "Senza titolo";
+    data.artist = source.artist || "";
+    await writeJsonAtomic(path.join(PIANO_JSON_DIR, fileName), data);
+    const hash = hashJsonData(data);
+    const song = {
+      id, title: data.name, artist: source.artist || "", composer: source.composer || "", genre: source.genre || "",
+      imageUrl: safeImageUrl(source.imageUrl), difficulty: source.difficulty || "intermedio", key: source.key || "",
+      bpm: Number(source.bpm || 120), duration: Number(data.song_length || 0), instruments: ["Mano destra", "Mano sinistra"],
+      importedAt: nowIso(), updatedAt: nowIso(), fileHash: hash, jsonContentHash: hash,
+      sourceFileName: fileName, jsonPath: `/library/jsonpiano/${fileName}`, midiPath: "",
+      variantType: "piano_reduction", reductionMode: "faithful", derivedFromSongId: source.id, versionName: name,
+      reductionSourceInstruments: Array.isArray(payload.selectedInstruments) ? payload.selectedInstruments.slice(0, 128).map(String) : [],
+    };
+    db.songs.push(song);
+    db.practiceMeta.push({ songId: id, lastPracticePointSec: 0, playbackSpeed: 1, favoriteLoops: [], studyStatus: "to_study" });
+    applySmartMembership(db, song);
     await writeDb(db);
     sendJson(res, 200, { song });
     return true;
@@ -997,7 +1047,7 @@ async function handleApi(req, res, url) {
         .map((song) => song.id),
     );
     const existing = db.songs.find(
-      (song) => song.variantType === "piano_reduction" && equivalentSourceIds.has(song.derivedFromSongId),
+      (song) => song.variantType === "piano_reduction" && song.reductionMode !== "faithful" && equivalentSourceIds.has(song.derivedFromSongId),
     );
     if (existing && payload.replaceExisting !== true) {
       sendJson(res, 409, { error: "Esiste già una riduzione di questo brano", existingSongId: existing.id });
@@ -1029,7 +1079,7 @@ async function handleApi(req, res, url) {
       }
       const engineResult = await runPianoReduction(reductionSourcePath, outputPath, analysisOutputPath);
       const reducedJson = JSON.parse(await fs.readFile(outputPath, "utf8"));
-      reducedJson.name = existing?.title || sourceSong.title || "Senza titolo";
+      reducedJson.name = titleWithoutArtist(existing?.title || sourceSong.title, sourceSong.artist) || "Senza titolo";
       let roleSourceIndices = {};
       let reductionAnalysis = {};
       try {
@@ -1072,7 +1122,7 @@ async function handleApi(req, res, url) {
         });
       }
       Object.assign(reductionSong, {
-        title: existing?.title || sourceSong.title || "Senza titolo",
+        title: titleWithoutArtist(existing?.title || sourceSong.title, sourceSong.artist) || "Senza titolo",
         artist: sourceSong.artist || "",
         composer: sourceSong.composer || "",
         genre: sourceSong.genre || "",
@@ -1959,6 +2009,18 @@ async function handleApi(req, res, url) {
     }
 
     const activeInstruments = payload.song?.activeInstruments;
+    if (Object.hasOwn(payload.song || {}, "handAssignments")) {
+      const hands = payload.song.handAssignments;
+      const valid = (value) => typeof value === "string" && /^(auto|none|track:\d{1,5})$/.test(value);
+      const validSplit = hands?.splitTrack === undefined || hands.splitTrack === "none" || /^track:\d{1,5}$/.test(hands.splitTrack);
+      const validSplitMidi = hands?.splitMidi === undefined || (Number.isInteger(hands.splitMidi) && hands.splitMidi >= 1 && hands.splitMidi <= 127);
+      if (!hands || typeof hands !== "object" || Array.isArray(hands) || !valid(hands.right) || !valid(hands.left) ||
+          !validSplit || !validSplitMidi || (hands.splitTrack && hands.splitTrack !== "none" && hands.splitMidi === undefined) ||
+          (hands.right === hands.left && !["auto", "none"].includes(hands.right)) || (hands.right === "none" && hands.left === "none")) {
+        sendJson(res, 400, { error: "Assegnazione delle mani non valida" });
+        return true;
+      }
+    }
     if (Object.hasOwn(payload.song || {}, "imageUrl") && payload.song.imageUrl !== "" && !safeImageUrl(payload.song.imageUrl)) {
       sendJson(res, 400, { error: "Indirizzo immagine non valido: usa un URL HTTPS" });
       return true;

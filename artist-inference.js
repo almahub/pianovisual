@@ -170,6 +170,18 @@ const KNOWN_TITLES = new Map(Object.entries({
 
 const VARIANT_WORDS = new Set(["filtered", "piano", "easy", "version", "short", "solo", "v2", "v3"]);
 
+export function titleWithoutArtist(title, artist) {
+  const value = String(title || "").trim();
+  const name = String(artist || "").trim();
+  const match = value.match(/^(.+?)\s+[-–—]\s+(.+)$/u);
+  if (!match || !name) return value;
+  const prefix = key(match[1]);
+  const artistKey = key(name);
+  const surname = artistKey.split(" ").filter(Boolean).at(-1) || "";
+  return prefix === artistKey || (surname.length >= 4 && prefix === surname)
+    ? match[2].trim() || value : value;
+}
+
 export function inferArtist({ title = "", fileName = "" } = {}) {
   for (const value of [title, fileName]) {
     const normalized = ` ${key(value)} `;

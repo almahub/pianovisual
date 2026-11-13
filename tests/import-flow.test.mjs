@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { titleWithoutArtist } from '../artist-inference.js';
 
 const root = process.cwd();
 const libraryDir = path.join(os.tmpdir(), `pianovisual-test-${process.pid}-${Date.now()}`);
@@ -180,6 +181,7 @@ test('MIDI originals and independent selected versions survive exports, sync and
   const originalMidi = Buffer.from(item.midiBase64, 'base64');
   const originalJson = await fs.readFile(jsonFile);
   assert.deepEqual(await fs.readFile(midiFile), originalMidi);
+  assert.equal((await api('/api/library')).songs.find((song) => song.id === original.id).jsonAvailable, true);
   assert.deepEqual(Buffer.from(await (await fetch(`${BASE}${original.midiPath}`)).arrayBuffer()), originalMidi);
 
   const createVersion = async (index, name) => {
@@ -216,13 +218,48 @@ test('MIDI originals and independent selected versions survive exports, sync and
   assert.equal((await fetch(`${BASE}${reduction.jsonPath}`)).status, 200);
 });
 
+test('faithful piano keeps chosen notes and does not replace source or automatic reduction', async () => {
+  const item = makeItem({ sourceFileName: 'faithful.mid', title: 'Fedele', midiSeed: 'faithful' });
+  item.jsonData = makeCompatiblePianoVisionJson();
+  const original = (await api('/api/library/import-batch', { method: 'POST', body: JSON.stringify({ items: [item] }) })).songs[0];
+  const sourcePath = path.join(jsonDir, path.basename(original.jsonPath));
+  const midiPath = path.join(libraryDir, 'midi', path.basename(original.midiPath));
+  const sourceBytes = await fs.readFile(sourcePath);
+  const midiBytes = await fs.readFile(midiPath);
+  const chosen = structuredClone(item.jsonData);
+  chosen.tracksV2.right[0].notes = [{ note: 72, start: 0, duration: 0.45 }];
+  chosen.tracksV2.left[0].notes = [{ note: 48, start: 0, duration: 0.45 }];
+  const create = (versionName) => api('/api/piano-reduction/faithful', { method: 'POST', body: JSON.stringify({ songId: original.id, versionName, sourceJson: chosen }) });
+  const first = (await create('Prima')).song;
+  const second = (await create('Seconda')).song;
+  assert.notEqual(first.id, second.id);
+  assert.equal(first.reductionMode, 'faithful');
+  const output = await (await fetch(`${BASE}${first.jsonPath}`)).json();
+  assert.deepEqual(output.tracksV2, chosen.tracksV2);
+  const auto = (await api('/api/piano-reduction/create', { method: 'POST', body: JSON.stringify({ songId: original.id }) })).song;
+  assert.equal(auto.reductionMode, 'piano_voice');
+  await api(`/api/songs/${first.id}`, { method: 'DELETE' });
+  assert.deepEqual(await fs.readFile(sourcePath), sourceBytes);
+  assert.deepEqual(await fs.readFile(midiPath), midiBytes);
+  assert.equal((await fetch(`${BASE}${second.jsonPath}`)).status, 200);
+});
+
+test('library reports a missing JSON separately from a still-available MIDI', async () => {
+  const item = makeItem({ sourceFileName: 'missing-json.mid', title: 'MIDI presente' });
+  const original = (await api('/api/library/import-batch', { method: 'POST', body: JSON.stringify({ items: [item] }) })).songs[0];
+  await fs.rm(path.join(jsonDir, path.basename(original.jsonPath)));
+  const song = (await api('/api/library')).songs.find((entry) => entry.id === original.id);
+  assert.equal(song.midiAvailable, true);
+  assert.equal(song.jsonAvailable, false);
+});
+
 test('exported JSON restores edited song metadata after reimport', async () => {
   const appSource = await fs.readFile(path.join(root, 'app.js'), 'utf8');
   const metadataSource = appSource.slice(
     appSource.indexOf('function jsonWithSongMetadata('),
     appSource.indexOf('async function exportFilteredSongJson()'),
   );
-  const jsonWithSongMetadata = new Function(`${metadataSource}\nreturn jsonWithSongMetadata;`)();
+  const jsonWithSongMetadata = new Function('titleWithoutArtist', `${metadataSource}\nreturn jsonWithSongMetadata;`)(titleWithoutArtist);
   const exported = jsonWithSongMetadata(makeCompatiblePianoVisionJson(), {
     title: 'Titolo corretto', artist: 'Artista corretto', composer: 'Compositore corretto', genre: 'Jazz',
   });
@@ -529,6 +566,18 @@ test('cover URL stays in application metadata and follows derived versions', asy
   await assert.rejects(api(`/api/songs/${original.id}`, { method: 'PUT', body: JSON.stringify({ song: { imageUrl: 'javascript:alert(1)' } }) }), /400/);
 });
 
+test('hand selections persist per song and reject conflicting tracks without rewriting music', async () => {
+  const item = makeItem({ title: 'Mani' });
+  const song = (await api('/api/library/import-batch', { method: 'POST', body: JSON.stringify({ items: [item] }) })).songs[0];
+  const file = path.join(jsonDir, path.basename(song.jsonPath));
+  const original = await fs.readFile(file);
+  const hands = { right: 'track:1', left: 'track:0' };
+  await api(`/api/songs/${song.id}`, { method: 'PUT', body: JSON.stringify({ song: { handAssignments: hands } }) });
+  assert.deepEqual((await api('/api/library')).songs.find((entry) => entry.id === song.id).handAssignments, hands);
+  await assert.rejects(api(`/api/songs/${song.id}`, { method: 'PUT', body: JSON.stringify({ song: { handAssignments: { right: 'track:0', left: 'track:0' } } }) }), /400/);
+  assert.deepEqual(await fs.readFile(file), original);
+});
+
 test('JSON import keeps different arrangements with the same title and artist', async () => {
   const full = makeCompatiblePianoVisionJson();
   full.name = 'Same Song';
@@ -735,6 +784,37 @@ test('existing piano reductions migrate from json and db.json to the dedicated l
   await assert.rejects(fs.access(path.join(jsonDir, legacyFileName)));
   assert.equal((JSON.parse(await fs.readFile(dbPath, 'utf8'))).songs.length, 0);
   assert.equal((JSON.parse(await fs.readFile(pianoDbPath, 'utf8'))).songs.length, 1);
+});
+
+test('reading a reduction never migrates or removes a same-named source JSON', async () => {
+  const name = 'same-name.json';
+  const source = JSON.stringify({ ...makeCompatiblePianoVisionJson(), name: 'Originale' });
+  const reduction = JSON.stringify({ ...makeCompatiblePianoVisionJson(), name: 'Riduzione' });
+  await fs.writeFile(path.join(jsonDir, name), source);
+  await fs.writeFile(path.join(pianoJsonDir, name), reduction);
+  const db = defaultDb();
+  db.songs.push({ id: 'source', title: 'Originale', jsonPath: `/library/json/${name}` });
+  await fs.writeFile(dbPath, JSON.stringify(db));
+  const piano = defaultDb();
+  piano.songs.push({ id: 'reduction', title: 'Riduzione', variantType: 'piano_reduction', reductionMode: 'piano_voice', derivedFromSongId: 'source', jsonPath: `/library/jsonpiano/${name}` });
+  await fs.writeFile(pianoDbPath, JSON.stringify(piano));
+  await api('/api/library');
+  await api('/api/library');
+  assert.equal(await fs.readFile(path.join(jsonDir, name), 'utf8'), source);
+  assert.equal(await fs.readFile(path.join(pianoJsonDir, name), 'utf8'), reduction);
+});
+
+test('legacy shared JSON migration copies instead of moving the source', async () => {
+  const name = 'shared.json';
+  const content = JSON.stringify(makeCompatiblePianoVisionJson());
+  await fs.writeFile(path.join(jsonDir, name), content);
+  const db = defaultDb();
+  db.songs.push({ id: 'source', title: 'Source', jsonPath: `/library/json/${name}` },
+    { id: 'legacy', title: 'Legacy', variantType: 'piano_reduction', jsonPath: `/library/json/${name}` });
+  await fs.writeFile(dbPath, JSON.stringify(db));
+  await api('/api/library');
+  assert.equal(await fs.readFile(path.join(jsonDir, name), 'utf8'), content);
+  assert.equal(await fs.readFile(path.join(pianoJsonDir, name), 'utf8'), content);
 });
 
 test('Piano Lab refuses a second reduction made from a duplicate source song', async () => {
