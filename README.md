@@ -52,6 +52,8 @@ Nel Visualizer si possono assegnare le tracce alle mani o dividere una traccia a
 
 Il riepilogo MIDI conta gli originali conservati; i record privi sia del MIDI sia del JSON non compaiono tra i brani disponibili, ma non vengono cancellati. Un MIDI con JSON mancante e segnalato e puo richiedere il ripristino dal backup o una nuova conversione dell'originale conservato.
 
+La Dashboard Studio mostra conteggi e collegamenti distinti per MIDI, riduzioni pianistiche e versioni con strumenti selezionati. I conteggi delle versioni includono solo quelle con il JSON disponibile.
+
 Nei dettagli, `Controllo compatibilita JSON` segnala possibili anomalie nelle tracce, nei tempi e nelle misure. E un controllo indicativo: non sostituisce la prova sul Quest. In `Modifica informazioni` si puo salvare un URL HTTPS per mostrare la copertina in PianoVisual. L'indirizzo e salvato nei dati dell'app e nel backup completo, non viene aggiunto automaticamente al JSON esportato; il supporto delle copertine personali in PianoVision non e verificato.
 
 ## Avvio senza VS Code (quick win)
@@ -62,7 +64,7 @@ Nei dettagli, `Controllo compatibilita JSON` segnala possibili anomalie nelle tr
   3. usa l'icona `PianoVisual` sul desktop
 
 ## App desktop installabile (Electron)
-Versione rilasciata piu recente nel repository: **v1.0.38**. Vedi [note di rilascio v1.0.38](RELEASE_NOTES_v1.0.38.md) e [changelog completo](CHANGELOG.md). Nel repository restano solo le ultime tre note di rilascio.
+Versione rilasciata piu recente nel repository: **v1.0.39**. Vedi [note di rilascio v1.0.39](RELEASE_NOTES_v1.0.39.md) e [changelog completo](CHANGELOG.md). Nel repository restano solo le ultime tre note di rilascio.
 
 ### Backup e ripristino
 Nell'app desktop, apri `File e backup` e usa `Backup completo` per salvare in uno ZIP tutta la cartella dati della libreria (database, JSON, riduzioni, export e altri file) insieme a tema e colori del Visualizer. Conserva lo ZIP fuori dalla libreria, preferibilmente anche su un altro disco: non e cifrato e contiene i tuoi dati personali. Per ripristinare, installa PianoVisual, scegli `Ripristina backup` e conferma. L'app verifica lo ZIP e conserva la libreria precedente in una cartella `library.before-restore-*` accanto alla libreria corrente. Lo ZIP non contiene l'eseguibile: la versione originale e indicata nel manifesto e si reinstalla dalla relativa release GitHub.

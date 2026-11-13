@@ -1517,17 +1517,14 @@ function renderTable() {
 function renderDirectoryPanel() {
   const allSongs = state.db?.songs || [];
   const songs = allSongs.filter((song) => !["piano_reduction", "selected_instruments"].includes(song.variantType) && (song.midiAvailable || song.jsonAvailable !== false));
-  const reductionCount = allSongs.filter((song) => song.variantType === "piano_reduction").length;
+  const reductionCount = allSongs.filter((song) => song.variantType === "piano_reduction" && song.jsonAvailable !== false).length;
+  const selectedCount = allSongs.filter((song) => song.variantType === "selected_instruments" && song.jsonAvailable !== false).length;
   const manual = (state.db?.collections || []).filter((c) => c.type === "playlist" && !c.smartRule);
   el.playlistsCards.classList.toggle("home-dashboard", state.view === "home");
 
   if (state.view === "home") {
     const midiSongs = songs.filter((song) => song.midiAvailable);
     const missingJsonCount = midiSongs.filter((song) => song.jsonAvailable === false).length;
-    const recentCount = midiSongs
-      .filter((s) => Date.now() - new Date(s.importedAt).getTime() <= 30 * 24 * 60 * 60 * 1000)
-      .length;
-    const toStudyCount = midiSongs.filter((song) => practiceBySong(song.id)?.studyStatus === "to_study").length;
     const favoriteCount = midiSongs.filter((s) => isFavorite(s.id)).length;
     const artistCount = new Set(midiSongs.map((s) => normalizeText(s.artist)).filter(Boolean)).size;
     const latestSongs = [...midiSongs]
@@ -1545,20 +1542,19 @@ function renderDirectoryPanel() {
       : '<li class="home-recent-empty">La libreria è vuota. Importa il primo brano per iniziare.</li>';
     el.playlistsSectionTitle.textContent = "Il tuo studio";
     el.playlistsCards.innerHTML = `
-      <article class="home-welcome-card">
+      <header class="home-welcome-card">
         <div>
           <span class="home-eyebrow">PianoVisual</span>
-          <strong>${midiSongs.length ? "Bentornato nella tua libreria" : "Inizia la tua libreria musicale"}</strong>
-          <p>${midiSongs.length ? `Hai ${midiSongs.length} MIDI in libreria.${missingJsonCount ? ` ${missingJsonCount} senza JSON sorgente.` : ""}` : "Importa un MIDI o cerca un brano nel catalogo remoto."}</p>
+          <strong>La tua musica, pronta per lo studio</strong>
+          <p>${missingJsonCount ? `${missingJsonCount} MIDI senza JSON sorgente` : `${artistCount} artisti · ${favoriteCount} preferiti`}</p>
         </div>
         <button class="btn" data-nav-target="library">Apri la libreria</button>
-      </article>
+      </header>
 
       <div class="home-stats" aria-label="Riepilogo libreria">
-        <article class="home-stat-card"><span>Libreria MIDI</span><strong>${midiSongs.length}</strong><small>MIDI originali</small></article>
-        <article class="home-stat-card"><span>Artisti</span><strong>${artistCount}</strong><small>catalogati</small></article>
-        <article class="home-stat-card"><span>Preferiti</span><strong>${favoriteCount}</strong><small>brani salvati</small></article>
-        <article class="home-stat-card"><span>Da studiare</span><strong>${toStudyCount}</strong><small>${recentCount} aggiunti di recente</small></article>
+        <button type="button" class="home-stat-card" data-nav-target="library"><span>Libreria MIDI</span><strong>${midiSongs.length}</strong><small>Originali</small></button>
+        <button type="button" class="home-stat-card" data-nav-target="reductions"><span>Riduzioni pianistiche</span><strong>${reductionCount}</strong><small>Versioni per piano</small></button>
+        <button type="button" class="home-stat-card" data-nav-target="selectedVersions"><span>Strumenti selezionati</span><strong>${selectedCount}</strong><small>Versioni salvate</small></button>
       </div>
 
       <section class="home-quick-section">

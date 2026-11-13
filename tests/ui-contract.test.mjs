@@ -63,6 +63,16 @@ test("desktop bridge exposes safe export, folder import and Quest sync actions",
   }
 });
 
+test("dashboard offers separate navigation and counts for available library types", async () => {
+  const app = await fs.readFile(path.join(root, "app.js"), "utf8");
+  const dashboard = app.slice(app.indexOf("function renderDirectoryPanel()"), app.indexOf("function renderViewLabels()"));
+  assert.match(dashboard, /song\.variantType === "piano_reduction" && song\.jsonAvailable !== false/);
+  assert.match(dashboard, /song\.variantType === "selected_instruments" && song\.jsonAvailable !== false/);
+  assert.match(dashboard, /data-nav-target="library"/);
+  assert.match(dashboard, /data-nav-target="reductions"/);
+  assert.match(dashboard, /data-nav-target="selectedVersions"/);
+});
+
 test("playlist actions and detail layout remain available", async () => {
   const app = await fs.readFile(path.join(root, "app.js"), "utf8");
   const css = await fs.readFile(path.join(root, "style.css"), "utf8");
@@ -372,6 +382,8 @@ test("desktop package includes and unpacks the local piano reduction engine", as
   const pkg = JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf8"));
   assert.equal(pkg.build.files.includes("skill/music-to-piano-json/**/*"), true);
   assert.equal(pkg.build.asarUnpack.includes("skill/music-to-piano-json/**/*"), true);
+  assert.ok(pkg.build.files.includes("!**/*.{mid,midi,mp3,wav,flac,m4a,MID,MIDI,MP3,WAV,FLAC,M4A}"));
+  assert.equal(pkg.build.files.includes("library/**/*"), false);
 });
 
 test("library selection supports queued piano reductions", async () => {

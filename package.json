@@ -1,6 +1,6 @@
 {
   "name": "pianovisual",
-  "version": "1.0.38",
+  "version": "1.0.39",
   "private": false,
   "type": "module",
   "main": "electron/main.cjs",
@@ -42,7 +42,8 @@
       "library/exports/.gitkeep",
       "electron/**/*",
       "skill/music-to-piano-json/**/*",
-      "package.json"
+      "package.json",
+      "!**/*.{mid,midi,mp3,wav,flac,m4a,MID,MIDI,MP3,WAV,FLAC,M4A}"
     ],
     "asarUnpack": [
       "**/*.node",

@@ -6,6 +6,14 @@ release/
 *.exe
 *.AppImage
 
+# Personal audio and MIDI must not be added to the repository.
+*.[mM][iI][dD]
+*.[mM][iI][dD][iI]
+*.[mM][pP]3
+*.[wW][aA][vV]
+*.[fF][lL][aA][cC]
+*.[mM]4[aA]
+
 # runtime/local library data
 library/json/*
 !library/json/.gitkeep

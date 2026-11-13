@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+## [1.0.39] - 2026-11-13
+### Changed
+- Dashboard Studio con conteggi e collegamenti separati per MIDI, riduzioni pianistiche e strumenti selezionati.
+- I record senza MIDI e senza JSON non compaiono nelle viste dei brani disponibili; rimangono conservati finche non vengono gestiti esplicitamente.
+- Regole aggiuntive escludono i file audio e MIDI personali da Git e dal pacchetto desktop.
+
 ## [1.0.38] - 2026-11-13
 ### Added
 - Piano fedele alle tracce scelte, assegnazione manuale delle mani e divisione di una traccia per nota MIDI.

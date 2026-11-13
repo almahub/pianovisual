@@ -2349,3 +2349,24 @@ tbody tr.active {
 .quest-file-list small { display: block; }
 .quest-file-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .quest-selection-error { color: #a51b1b; }
+
+.smart-cards.home-dashboard { grid-template-columns: minmax(0, 1fr) minmax(280px, .85fr); gap: 24px; }
+.home-welcome-card { padding: 4px 0 18px; border: 0; border-bottom: 1px solid #383838; border-radius: 0; background: transparent; }
+.home-eyebrow { letter-spacing: 0; }
+.home-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: #383838; border: 1px solid #383838; }
+.home-stat-card { border: 0; border-radius: 0; background: #1b1b1b; text-align: left; cursor: pointer; min-width: 0; padding: 18px; }
+.home-stat-card:hover, .home-stat-card:focus-visible { background: #292929; outline: 2px solid #65e793; outline-offset: -2px; }
+.home-stat-card span { overflow-wrap: anywhere; }
+.home-quick-section, .home-recent-section { padding: 0; border: 0; border-radius: 0; background: transparent; }
+.home-quick-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
+.home-action-card, .home-action-card.piano-action { display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 0 8px; padding: 10px 2px; border: 0; border-bottom: 1px solid #383838; border-radius: 0; background: transparent; }
+.home-action-card > span { grid-row: 1 / 3; margin: 0; }
+.home-action-card:hover { transform: none; background: #252525; }
+:root[data-theme="light"] .home-welcome-card, :root[data-theme="light"] .home-quick-section, :root[data-theme="light"] .home-recent-section { border-color: #d5deea; background: transparent; }
+:root[data-theme="light"] .home-action-card, :root[data-theme="light"] .home-action-card.piano-action { background: transparent; border-color: #d5deea; }
+:root[data-theme="light"] .home-stats { border-color: #d5deea; background: #d5deea; }
+@media (max-width: 760px) {
+  .smart-cards.home-dashboard { grid-template-columns: 1fr; gap: 20px; }
+  .home-stats { grid-template-columns: 1fr; }
+  .home-quick-actions { grid-template-columns: 1fr; }
+}
