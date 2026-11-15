@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+## [1.0.40] - 2026-11-15
+### Added
+- Cataloghi remoti Mutopia e MIDI Collection, con ricerca e navigazione per artisti.
+- Confronto e importazione assistita di preferiti e playlist dal Quest; invio manuale di playlist al Quest con backup e verifica.
+- Possibilita di inviare copie JSON con il nome della versione nel titolo, mantenendo invariati gli originali.
+
+### Changed
+- Artisti e Generi mostrano i MIDI disponibili; i JSON precedenti rimangono conservati.
+- Migliorie al backup, alla gestione dei cataloghi e ai controlli di trasferimento.
+- La sincronizzazione al collegamento e l'invio dei preferiti da PianoVisual al Quest non sono ancora automatici.
+
 ## [1.0.39] - 2026-11-13
 ### Changed
 - Dashboard Studio con conteggi e collegamenti separati per MIDI, riduzioni pianistiche e strumenti selezionati.

@@ -9,8 +9,13 @@ contextBridge.exposeInMainWorld("pianovisualDesktop", {
   selectJsonFolder: () => ipcRenderer.invoke("json:select-folder"),
   questStatus: () => ipcRenderer.invoke("quest:status"),
   questPullJson: () => ipcRenderer.invoke("quest:pull-json"),
-  questPreviewPush: () => ipcRenderer.invoke("quest:preview-push"),
-  questPushJson: (fileNames) => ipcRenderer.invoke("quest:push-json", fileNames),
+  questCompareCollections: () => ipcRenderer.invoke("quest:compare-collections"),
+  questApplyFavoriteSync: (request) => ipcRenderer.invoke("quest:apply-favorite-sync", request),
+  questApplyPlaylistSync: (request) => ipcRenderer.invoke("quest:apply-playlist-sync", request),
+  questPreviewOutgoingPlaylist: (request) => ipcRenderer.invoke("quest:preview-outgoing-playlist", request),
+  questSendOutgoingPlaylist: (request) => ipcRenderer.invoke("quest:send-outgoing-playlist", request),
+  questPreviewPush: (labeled) => ipcRenderer.invoke("quest:preview-push", labeled),
+  questPushJson: (files, serial, labeled) => ipcRenderer.invoke("quest:push-json", files, serial, labeled),
   onUpdateStatus: (handler) => {
     if (typeof handler !== "function") return () => {};
     const listener = (_, payload) => handler(payload);

@@ -64,7 +64,7 @@ Nei dettagli, `Controllo compatibilita JSON` segnala possibili anomalie nelle tr
   3. usa l'icona `PianoVisual` sul desktop
 
 ## App desktop installabile (Electron)
-Versione rilasciata piu recente nel repository: **v1.0.39**. Vedi [note di rilascio v1.0.39](RELEASE_NOTES_v1.0.39.md) e [changelog completo](CHANGELOG.md). Nel repository restano solo le ultime tre note di rilascio.
+Versione rilasciata piu recente nel repository: **v1.0.40**. Vedi [note di rilascio v1.0.40](RELEASE_NOTES_v1.0.40.md) e [changelog completo](CHANGELOG.md). Nel repository restano solo le ultime tre note di rilascio.
 
 ### Backup e ripristino
 Nell'app desktop, apri `File e backup` e usa `Backup completo` per salvare in uno ZIP tutta la cartella dati della libreria (database, JSON, riduzioni, export e altri file) insieme a tema e colori del Visualizer. Conserva lo ZIP fuori dalla libreria, preferibilmente anche su un altro disco: non e cifrato e contiene i tuoi dati personali. Per ripristinare, installa PianoVisual, scegli `Ripristina backup` e conferma. L'app verifica lo ZIP e conserva la libreria precedente in una cartella `library.before-restore-*` accanto alla libreria corrente. Lo ZIP non contiene l'eseguibile: la versione originale e indicata nel manifesto e si reinstalla dalla relativa release GitHub.
@@ -106,6 +106,12 @@ Output in `dist/` (installer NSIS).
 - Prima dell'invio PianoVisual confronta gli hash e mostra nuovi, modificati e gia uguali.
 - Seleziona i singoli file da inviare: i file omonimi modificati sul Quest vengono sovrascritti solo dopo conferma. Il confronto e ripetuto prima della copia e l'hash viene verificato dopo il trasferimento. Prima dell'invio conserva una copia dei JSON che vuoi mantenere.
 - La sincronizzazione non elimina automaticamente file dal Quest. Non cancellare le cartelle dell'app o i file di database per ripulire i brani personali.
+- In fase di invio puoi scegliere copie con il nome della versione nel titolo; le copie sono importazioni separate e non modificano i JSON locali o le importazioni esistenti. PianoVision non raggruppa automaticamente queste copie nel menu delle versioni ufficiali.
+- `Confronta preferiti e playlist` consente di importare preferiti e playlist dal Quest con anteprima e conferma. L'invio di una playlist da PianoVisual richiede un profilo, una destinazione e JSON gia importati e indicizzati dal gioco, con corrispondenze verificate. Chiudi PianoVision prima della scrittura: viene salvato un backup del database e le voci esistenti non vengono rimosse.
+- La sincronizzazione non parte automaticamente al collegamento. L'invio dei preferiti da PianoVisual al Quest e la propagazione delle rimozioni verso il Quest non sono attualmente disponibili. Se l'USB si interrompe durante la scrittura del database, non avviare PianoVision e conserva il backup indicato dal programma per il ripristino.
+
+### Cataloghi remoti
+Il catalogo remoto permette di consultare Kara per Tutti, Mutopia e MIDI Collection. Disponibilita, licenze e condizioni d'uso dipendono dalle rispettive fonti: verificale prima di scaricare o utilizzare i brani. I file personali non sono inclusi nel repository o nella release.
 
 ## Struttura progetto
 - `app.js`: logica frontend (import, UI, visualizer)

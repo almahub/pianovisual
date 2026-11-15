@@ -524,6 +524,98 @@ test('import-json-archive skip duplicate keeps original', async () => {
   assert.equal(db.songs[0].title, 'Archive Song');
 });
 
+test('Internet Archive rejects invalid search, identifiers and file paths', async () => {
+  await assert.rejects(api('/api/archive/search?q=a'), /400/);
+  await assert.rejects(api('/api/archive/files?id=..%2Fsecret'), /400/);
+  for (const value of [JSON.stringify(['valid', '../secret.mid']), JSON.stringify(['valid', 'song.zip']), JSON.stringify(['../bad', 'song.mid']), 'not-json']) {
+    await assert.rejects(api('/api/archive/fetch', { method: 'POST', body: JSON.stringify({ paths: [value] }) }), /400/);
+  }
+  await assert.rejects(api('/api/archive/fetch', { method: 'POST', body: JSON.stringify({ paths: Array(21).fill(JSON.stringify(['valid', 'song.mid'])) }) }), /400/);
+});
+
+test('PianoVera rejects empty and oversized download batches before network access', async () => {
+  for (const paths of [[], Array(21).fill('/assets/partitions/a/a.mid'), [42]]) {
+    await assert.rejects(api('/api/pianovera/fetch', { method: 'POST', body: JSON.stringify({ paths }) }), /400/);
+  }
+});
+
+test('Mutopia rejects invalid searches and unlisted downloads', async () => {
+  await assert.rejects(api('/api/mutopia/search?q=a'), /400/);
+  await assert.rejects(api('/api/mutopia/search?q=chopin&page=-1'), /400/);
+  for (const paths of [[], ['/ftp/unlisted.mid'], ['https://evil.example/x.mid'], Array(21).fill('/ftp/x.mid')]) {
+    await assert.rejects(api('/api/mutopia/fetch', { method: 'POST', body: JSON.stringify({ paths }) }), /400/);
+  }
+});
+
+test('MIDI Collection rejects invalid searches and unlisted downloads', async () => {
+  await assert.rejects(api('/api/midi-collection/search?q=a'), /400/);
+  await assert.rejects(api('/api/midi-collection/search?q=chopin&page=0'), /400/);
+  for (const paths of [[], ['/midi/unlisted.mid'], ['https://evil.example/x.mid'], Array(21).fill('/midi/x.mid')]) {
+    await assert.rejects(api('/api/midi-collection/fetch', { method: 'POST', body: JSON.stringify({ paths }) }), /400/);
+  }
+});
+
+test('favorite sync persists links, rejects stale previews and preserves unrelated favorites', async () => {
+  const result = await api('/api/library/import-batch', { method: 'POST', body: JSON.stringify({ items: [makeItem({ title: 'One', sourceFileName: 'one.mid', midiSeed: 'sync-a' }), makeItem({ title: 'Two', sourceFileName: 'two.mid', midiSeed: 'sync-b' })] }) });
+  const [first, second] = result.songs;
+  await api(`/api/songs/${second.id}`, { method: 'PUT', body: JSON.stringify({ favorite: true }) });
+  const scope = { device: 'test-quest', profileId: 1, remoteIds: [42], choices: [{ pieceId: 42, songId: first.id }] };
+  const plan = await api('/api/quest/favorites-plan', { method: 'POST', body: JSON.stringify(scope) });
+  assert.deepEqual(plan.added.map((song) => song.id), [first.id]);
+  await api(`/api/songs/${second.id}`, { method: 'PUT', body: JSON.stringify({ song: { title: 'Updated' } }) });
+  await assert.rejects(api('/api/quest/favorites-apply', { method: 'POST', body: JSON.stringify({ ...scope, revision: plan.revision }) }), /409/);
+  const updated = await api('/api/quest/favorites-plan', { method: 'POST', body: JSON.stringify(scope) });
+  await api('/api/quest/favorites-apply', { method: 'POST', body: JSON.stringify({ ...scope, revision: updated.revision }) });
+  let library = await api('/api/library');
+  assert.ok(library.songCollection.some((item) => item.songId === first.id && item.collectionId === 'col-favorites'));
+  assert.equal(library.questFavoriteSync.bindings[0].songId, first.id);
+  const removedScope = { ...scope, remoteIds: [], choices: [] };
+  const removePlan = await api('/api/quest/favorites-plan', { method: 'POST', body: JSON.stringify(removedScope) });
+  assert.deepEqual(removePlan.removed.map((song) => song.id), [first.id]);
+  await api('/api/quest/favorites-apply', { method: 'POST', body: JSON.stringify({ ...removedScope, revision: removePlan.revision }) });
+  library = await api('/api/library');
+  assert.ok(!library.songCollection.some((item) => item.songId === first.id && item.collectionId === 'col-favorites'));
+  assert.ok(library.songCollection.some((item) => item.songId === second.id && item.collectionId === 'col-favorites'));
+});
+
+test('a manually touched favorite is not removed by a later Quest sync', async () => {
+  const song = (await api('/api/library/import-batch', { method: 'POST', body: JSON.stringify({ items: [makeItem({ title: 'Manual favorite', sourceFileName: 'manual.mid' })] }) })).songs[0];
+  const scope = { device: 'test-quest', profileId: 1, remoteIds: [7], choices: [{ pieceId: 7, songId: song.id }] };
+  const first = await api('/api/quest/favorites-plan', { method: 'POST', body: JSON.stringify(scope) });
+  await api('/api/quest/favorites-apply', { method: 'POST', body: JSON.stringify({ ...scope, revision: first.revision }) });
+  await api(`/api/songs/${song.id}`, { method: 'PUT', body: JSON.stringify({ favorite: true }) });
+  const empty = { ...scope, remoteIds: [], choices: [] };
+  const plan = await api('/api/quest/favorites-plan', { method: 'POST', body: JSON.stringify(empty) });
+  assert.deepEqual(plan.removed, []);
+  await api('/api/quest/favorites-apply', { method: 'POST', body: JSON.stringify({ ...empty, revision: plan.revision }) });
+  assert.ok((await api('/api/library')).songCollection.some((item) => item.songId === song.id && item.collectionId === 'col-favorites'));
+});
+
+test('playlist sync creates a linked playlist, rejects stale previews and protects manual members', async () => {
+  const result = await api('/api/library/import-batch', { method: 'POST', body: JSON.stringify({ items: [makeItem({ title: 'One', sourceFileName: 'playlist-a.mid', midiSeed: 'playlist-a' }), makeItem({ title: 'Two', sourceFileName: 'playlist-b.mid', midiSeed: 'playlist-b' })] }) });
+  const [first, second] = result.songs;
+  const scope = { device: 'test-quest', profileId: 1, playlistId: 2, playlistName: 'Vinicio', localId: '__create__', remoteIds: [42], choices: [{ pieceId: 42, songId: first.id }] };
+  let plan = await api('/api/quest/playlist-plan', { method: 'POST', body: JSON.stringify(scope) });
+  assert.equal(plan.create, true);
+  await api('/api/quest/playlist-apply', { method: 'POST', body: JSON.stringify({ ...scope, revision: plan.revision }) });
+  let library = await api('/api/library');
+  const localId = library.questPlaylistSync.playlists[0].localId;
+  assert.equal(library.collections.find((item) => item.id === localId).name, 'Vinicio');
+  assert.ok(library.songCollection.some((item) => item.songId === first.id && item.collectionId === localId));
+  await api(`/api/songs/${second.id}`, { method: 'PUT', body: JSON.stringify({ collectionIds: [localId] }) });
+  const empty = { ...scope, localId, remoteIds: [], choices: [] };
+  plan = await api('/api/quest/playlist-plan', { method: 'POST', body: JSON.stringify(empty) });
+  assert.deepEqual(plan.removed.map((song) => song.id), [first.id]);
+  await api(`/api/songs/${second.id}`, { method: 'PUT', body: JSON.stringify({ song: { title: 'Changed' } }) });
+  await assert.rejects(api('/api/quest/playlist-apply', { method: 'POST', body: JSON.stringify({ ...empty, revision: plan.revision }) }), /409/);
+  plan = await api('/api/quest/playlist-plan', { method: 'POST', body: JSON.stringify(empty) });
+  await api('/api/quest/playlist-apply', { method: 'POST', body: JSON.stringify({ ...empty, revision: plan.revision }) });
+  library = await api('/api/library');
+  assert.ok(!library.songCollection.some((item) => item.songId === first.id && item.collectionId === localId));
+  assert.ok(library.songCollection.some((item) => item.songId === second.id && item.collectionId === localId));
+  assert.ok(library.songs.some((item) => item.id === first.id));
+});
+
 test('reattaching a legacy MIDI preserves edited metadata, playlists and practice progress', async () => {
   const item = makeItem({ sourceFileName: 'original.mid', title: 'Nome dal file', artist: '', midiSeed: 'legacy' });
   const first = await api('/api/library/import-batch', { method: 'POST', body: JSON.stringify({ items: [item] }) });

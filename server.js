@@ -7,6 +7,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { inferArtist, titleWithoutArtist } from "./artist-inference.js";
+import { parsePianoveraCatalog } from "./pianovera-catalog.js";
+import { parseMutopiaResults, parseMutopiaComposers } from "./mutopia-catalog.js";
+import { parseMidiCollectionResults, parseMidiCollectionArtists, parseMidiCollectionArtistSongs } from "./midi-collection-catalog.js";
+import favoriteSync from "./electron/favorite-sync.cjs";
+import playlistSync from "./electron/playlist-sync.cjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,6 +30,66 @@ const DB_PATH = path.join(LIBRARY_DIR, "db.json");
 const PIANO_DB_PATH = path.join(LIBRARY_DIR, "dbpiano.json");
 const PACKAGE_JSON_PATH = path.join(__dirname, "package.json");
 const REMOTE_CATALOG_ORIGIN = "https://ftp.karapertutti.altervista.org";
+const ARCHIVE_ORIGIN = "https://archive.org";
+const ARCHIVE_MAX_MIDI_BYTES = 10 * 1024 * 1024;
+const PIANOVERA_ORIGIN = "https://pianovera.com";
+const MUTOPIA_ORIGIN = "https://www.mutopiaproject.org";
+const mutopiaFiles = new Map();
+const MIDI_COLLECTION_ORIGIN = "https://midicollection.com";
+const midiCollectionFiles = new Map();
+const remoteArtistsCache = new Map();
+let pianoVeraCache = null;
+
+async function boundedRemoteBody(response, maxBytes) {
+  if (Number(response.headers.get("content-length")) > maxBytes) throw new Error("File remoto troppo grande");
+  const chunks = []; let size = 0;
+  for await (const chunk of response.body) {
+    size += chunk.length;
+    if (size > maxBytes) { await response.body.cancel?.().catch(() => {}); throw new Error("File remoto troppo grande"); }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+async function loadSourceArtists(source) {
+  const cached = remoteArtistsCache.get(source);
+  if (cached && Date.now() - cached.time < 10 * 60 * 1000) return cached.artists;
+  const target = source === 'mutopia' ? `${MUTOPIA_ORIGIN}/advsearch.html` : `${MIDI_COLLECTION_ORIGIN}/artists`;
+  const response = await fetch(target, { redirect: 'error', signal: AbortSignal.timeout(20000) });
+  if (!response.ok) throw new Error(`Elenco artisti non disponibile (HTTP ${response.status})`);
+  const html = (await boundedRemoteBody(response, 2 * 1024 * 1024)).toString('utf8');
+  const artists = source === 'mutopia' ? parseMutopiaComposers(html) : parseMidiCollectionArtists(html);
+  if (!artists.length) throw new Error('Elenco artisti non disponibile');
+  remoteArtistsCache.set(source, { time: Date.now(), artists });
+  return artists;
+}
+
+async function loadPianoveraCatalog() {
+  if (pianoVeraCache && Date.now() - pianoVeraCache.time < 10 * 60 * 1000) return pianoVeraCache.songs;
+  const response = await fetch(`${PIANOVERA_ORIGIN}/en/midi/`, { redirect: "error", signal: AbortSignal.timeout(20000) });
+  if (!response.ok) throw new Error(`PianoVera non disponibile (HTTP ${response.status})`);
+  const html = (await boundedRemoteBody(response, 2 * 1024 * 1024)).toString("utf8");
+  const songs = parsePianoveraCatalog(html);
+  if (!songs.length) throw new Error("Catalogo PianoVera non leggibile o vuoto");
+  pianoVeraCache = { songs, time: Date.now() };
+  return songs;
+}
+
+function archiveIdentifier(value) {
+  return typeof value === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$/.test(value) ? value : "";
+}
+
+function archiveFilename(value) {
+  return typeof value === "string" && value.length <= 1024 && !/[\x00-\x1f\\]/.test(value) && !value.startsWith("/") && !value.split("/").some((part) => part === ".." || part === ".") && /\.(mid|midi)$/i.test(value) ? value : "";
+}
+
+async function archiveJson(pathname, params = {}) {
+  const target = new URL(pathname, ARCHIVE_ORIGIN);
+  for (const [key, value] of Object.entries(params)) target.searchParams.set(key, value);
+  const response = await fetch(target, { signal: AbortSignal.timeout(20000), headers: { Accept: "application/json" } });
+  if (!response.ok) throw new Error(`Internet Archive non disponibile (HTTP ${response.status})`);
+  return response.json();
+}
 const execFileAsync = promisify(execFile);
 
 let cachedAppVersion = "";
@@ -780,6 +845,32 @@ function decodeHtmlText(value) {
     .trim();
 }
 
+function archiveDescriptionTitles(description, identifier) {
+  const titles = new Map();
+  for (const match of String(description || "").matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)) {
+    const content = match[1];
+    const label = decodeHtmlText(content.split(/<a\b/i)[0]).replace(/^Item\s+\d+\s*:\s*/i, "").replace(/\s*\(\s*$/, "").trim();
+    if (!label || label.length > 200) continue;
+    for (const link of content.matchAll(/href=["']([^"']+)["']/gi)) {
+      try {
+        const target = new URL(decodeHtmlText(link[1]), ARCHIVE_ORIGIN);
+        const prefix = `/download/${encodeURIComponent(identifier)}/`;
+        if (target.hostname !== "archive.org" || !target.pathname.startsWith(prefix)) continue;
+        const filename = decodeURIComponent(target.pathname.slice(prefix.length));
+        if (archiveFilename(filename)) titles.set(filename, label);
+      } catch { /* Ignore malformed links in external metadata. */ }
+    }
+  }
+  return titles;
+}
+
+function archiveKnownComposer(metadata) {
+  const creators = Array.isArray(metadata.creator) ? metadata.creator : [metadata.creator].filter(Boolean);
+  if (!creators.length || creators.slice(1).some((creator) => !/\b(ed|editor|edited)\b/i.test(String(creator)))) return "";
+  const composer = inferArtist({ title: String(creators[0]) });
+  return ["Frédéric Chopin", "Ludwig van Beethoven", "Johann Sebastian Bach", "Wolfgang Amadeus Mozart"].includes(composer) ? composer : "";
+}
+
 function validRemoteMidiPath(value) {
   const clean = decodeHtmlText(value).replace(/\\'/g, "'").trim();
   if (!clean || clean.includes("\0") || clean.startsWith("/") || clean.split("/").includes("..")) return "";
@@ -907,6 +998,61 @@ function extractHtmlMeta(html, baseUrl) {
 }
 
 async function handleApi(req, res, url) {
+  if (req.method === "POST" && ["/api/quest/playlist-plan", "/api/quest/playlist-apply"].includes(url.pathname)) {
+    try {
+      const payload = await readBodyJson(req);
+      const db = await readDb();
+      const revision = createHash("sha256").update(JSON.stringify({ songs: db.songs, collections: db.collections, songCollection: db.songCollection, questPlaylistSync: db.questPlaylistSync || null })).digest("hex");
+      if (url.pathname.endsWith("playlist-apply") && payload.revision !== revision) { sendJson(res, 409, { error: "La libreria e cambiata: ripeti il confronto." }); return true; }
+      const plan = playlistSync.planPlaylistSync(db, payload);
+      if (url.pathname.endsWith("playlist-plan")) {
+        const names = new Map(db.songs.map((song) => [song.id, { id: song.id, title: song.title || "", artist: song.artist || "" }]));
+        const target = db.collections.find((entry) => entry.id === plan.localId);
+        sendJson(res, 200, { revision, create: plan.create, playlistName: plan.create ? plan.name : target.name, added: plan.added.map((id) => names.get(id)), removed: plan.removed.map((id) => names.get(id)).filter(Boolean) }); return true;
+      }
+      let targetId = plan.localId;
+      if (plan.create) {
+        targetId = uid("col");
+        db.collections.push({ id: targetId, name: plan.name, type: "playlist", sortOrder: db.collections.length, createdAt: nowIso() });
+      }
+      const removed = new Set(plan.removed);
+      db.songCollection = (db.songCollection || []).filter((entry) => entry.collectionId !== targetId || !removed.has(entry.songId));
+      for (const songId of plan.added) db.songCollection.push({ songId, collectionId: targetId });
+      db.questPlaylistSync = {
+        version: 1,
+        playlists: plan.playlists.map((entry) => entry.localId === playlistSync.NEW_PLAYLIST ? { ...entry, localId: targetId } : entry),
+        managedMemberships: plan.managedMemberships.map((entry) => entry.collectionId === playlistSync.NEW_PLAYLIST ? { ...entry, collectionId: targetId } : entry),
+      };
+      await writeDb(db);
+      sendJson(res, 200, { created: plan.create, added: plan.added.length, removed: plan.removed.length });
+    } catch (error) { sendJson(res, 400, { error: error.message }); }
+    return true;
+  }
+
+  if (req.method === "POST" && ["/api/quest/favorites-plan", "/api/quest/favorites-apply"].includes(url.pathname)) {
+    try {
+      const payload = await readBodyJson(req);
+      const db = await readDb();
+      const revision = createHash("sha256").update(JSON.stringify({ songs: db.songs, songCollection: db.songCollection, questFavoriteSync: db.questFavoriteSync || null })).digest("hex");
+      if (url.pathname.endsWith("favorites-apply") && payload.revision !== revision) {
+        sendJson(res, 409, { error: "La libreria e cambiata: ripeti il confronto." }); return true;
+      }
+      const plan = favoriteSync.planFavoriteSync(db, payload);
+      if (url.pathname.endsWith("favorites-plan")) {
+        const names = new Map(db.songs.map((song) => [song.id, { id: song.id, title: song.title || "", artist: song.artist || "" }]));
+        sendJson(res, 200, { revision, added: plan.added.map((id) => names.get(id)), removed: plan.removed.map((id) => names.get(id)).filter(Boolean) }); return true;
+      }
+      const favoriteIds = new Set(plan.favoriteIds);
+      db.songCollection = (db.songCollection || []).filter((entry) => entry.collectionId !== "col-favorites");
+      for (const songId of favoriteIds) db.songCollection.push({ songId, collectionId: "col-favorites" });
+      for (const song of db.songs) if (plan.added.includes(song.id) || plan.removed.includes(song.id)) song.favorite = favoriteIds.has(song.id);
+      db.questFavoriteSync = { version: 1, bindings: plan.bindings, managedSongIds: plan.managedSongIds };
+      await writeDb(db);
+      sendJson(res, 200, { added: plan.added.length, removed: plan.removed.length });
+    } catch (error) { sendJson(res, 400, { error: error.message }); }
+    return true;
+  }
+
   if (req.method === "GET" && url.pathname === "/api/version") {
     const version = await getAppVersion();
     sendJson(res, 200, { version });
@@ -1163,6 +1309,223 @@ async function handleApi(req, res, url) {
     } finally {
       await fs.rm(tempDir, { recursive: true, force: true });
     }
+    return true;
+  }
+
+  if (req.method === "GET" && (url.pathname === "/api/mutopia/artists" || url.pathname === "/api/midi-collection/artists")) {
+    try {
+      const source = url.pathname.includes('/mutopia/') ? 'mutopia' : 'midiCollection';
+      sendJson(res, 200, { artists: await loadSourceArtists(source) });
+    } catch (error) { sendJson(res, 502, { error: error.message }); }
+    return true;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/midi-collection/artist") {
+    try {
+      const requested = String(url.searchParams.get('path') || '');
+      const name = String(url.searchParams.get('name') || '');
+      const artists = await loadSourceArtists('midiCollection');
+      const artist = artists.find((entry) => entry.path === requested && entry.name === name);
+      if (!artist) { sendJson(res, 400, { error: 'Artista non presente nel catalogo' }); return true; }
+      const response = await fetch(new URL(artist.path, MIDI_COLLECTION_ORIGIN), { redirect: 'error', signal: AbortSignal.timeout(20000) });
+      if (!response.ok) throw new Error(`Artista non disponibile (HTTP ${response.status})`);
+      const songs = parseMidiCollectionArtistSongs((await boundedRemoteBody(response, 2 * 1024 * 1024)).toString('utf8'), artist.name);
+      for (const song of songs) midiCollectionFiles.set(song.path, song);
+      while (midiCollectionFiles.size > 5000) midiCollectionFiles.delete(midiCollectionFiles.keys().next().value);
+      sendJson(res, 200, { songs, artist: artist.name, expectedCount: artist.count });
+    } catch (error) { sendJson(res, 502, { error: error.message }); }
+    return true;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/midi-collection/search") {
+    const query = String(url.searchParams.get("q") || "").trim();
+    const page = Number(url.searchParams.get("page") || "1");
+    if (query.length < 2 || query.length > 120 || !Number.isInteger(page) || page < 1 || page > 5000) {
+      sendJson(res, 400, { error: "Ricerca o pagina non valida" }); return true;
+    }
+    try {
+      const response = await fetch(`${MIDI_COLLECTION_ORIGIN}/search`, {
+        method: "POST", redirect: "error", signal: AbortSignal.timeout(20000),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ search: query, page: String(page) }),
+      });
+      if (!response.ok) throw new Error(`MIDI Collection non disponibile (HTTP ${response.status})`);
+      const result = parseMidiCollectionResults((await boundedRemoteBody(response, 2 * 1024 * 1024)).toString("utf8"));
+      if (result.page !== page) throw new Error("La fonte ha restituito una pagina inattesa");
+      for (const song of result.songs) midiCollectionFiles.set(song.path, song);
+      while (midiCollectionFiles.size > 5000) midiCollectionFiles.delete(midiCollectionFiles.keys().next().value);
+      sendJson(res, 200, result);
+    } catch (error) { sendJson(res, 502, { error: error.message }); }
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/midi-collection/fetch") {
+    const payload = await readBodyJson(req);
+    const paths = Array.isArray(payload.paths) ? payload.paths : [];
+    if (!paths.length || paths.length > 20 || paths.some((item) => typeof item !== "string" || !midiCollectionFiles.has(item))) {
+      sendJson(res, 400, { error: "Seleziona da 1 a 20 MIDI trovati in MIDI Collection" }); return true;
+    }
+    const files = [], errors = [];
+    for (const item of paths) {
+      try {
+        const target = new URL(item, MIDI_COLLECTION_ORIGIN);
+        if (target.origin !== MIDI_COLLECTION_ORIGIN || !target.pathname.startsWith("/midi/")) throw new Error("Indirizzo non consentito");
+        const response = await fetch(target, { redirect: "error", signal: AbortSignal.timeout(30000) });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const buffer = await boundedRemoteBody(response, ARCHIVE_MAX_MIDI_BYTES);
+        if (buffer.subarray(0, 4).toString("ascii") !== "MThd") throw new Error("Il file non e un MIDI valido");
+        files.push({ path: item, fileName: sanitizeName(midiCollectionFiles.get(item).fileName), midiBase64: buffer.toString("base64") });
+      } catch (error) { errors.push({ path: item, error: error.message }); }
+    }
+    sendJson(res, files.length ? 200 : 502, { files, errors, error: files.length ? undefined : errors.map((entry) => entry.error).join('; ') });
+    return true;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/mutopia/search") {
+    const query = String(url.searchParams.get("q") || "").trim();
+    const composer = String(url.searchParams.get("composer") || "");
+    const page = Number(url.searchParams.get("page") || "0");
+    if ((!composer && query.length < 2) || query.length > 120 || (composer && !/^[a-z0-9_-]{1,100}$/i.test(composer)) || !Number.isInteger(page) || page < 0 || page > 500) {
+      sendJson(res, 400, { error: "Ricerca o pagina non valida" }); return true;
+    }
+    try {
+      const target = new URL("/cgibin/make-table.cgi", MUTOPIA_ORIGIN);
+      target.searchParams.set("searchingfor", query);
+      if (composer) target.searchParams.set("Composer", composer);
+      target.searchParams.set("startat", String(page * 10));
+      const response = await fetch(target, { redirect: "error", signal: AbortSignal.timeout(20000) });
+      if (!response.ok) throw new Error(`Mutopia non disponibile (HTTP ${response.status})`);
+      const html = (await boundedRemoteBody(response, 2 * 1024 * 1024)).toString("utf8");
+      const result = parseMutopiaResults(html);
+      for (const song of result.songs) mutopiaFiles.set(song.path, song);
+      while (mutopiaFiles.size > 5000) mutopiaFiles.delete(mutopiaFiles.keys().next().value);
+      sendJson(res, 200, { ...result, page });
+    } catch (error) { sendJson(res, 502, { error: error.message }); }
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/mutopia/fetch") {
+    const payload = await readBodyJson(req);
+    const paths = Array.isArray(payload.paths) ? payload.paths : [];
+    if (!paths.length || paths.length > 20 || paths.some((item) => typeof item !== "string" || !mutopiaFiles.has(item))) {
+      sendJson(res, 400, { error: "Seleziona da 1 a 20 MIDI trovati nel catalogo Mutopia" }); return true;
+    }
+    const files = [], errors = [];
+    for (const item of paths) {
+      try {
+        const target = new URL(item, MUTOPIA_ORIGIN);
+        if (target.origin !== MUTOPIA_ORIGIN || !target.pathname.startsWith('/ftp/')) throw new Error("Indirizzo non consentito");
+        const response = await fetch(target, { redirect: "error", signal: AbortSignal.timeout(30000) });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const buffer = await boundedRemoteBody(response, ARCHIVE_MAX_MIDI_BYTES);
+        if (buffer.subarray(0, 4).toString("ascii") !== "MThd") throw new Error("Il file non e un MIDI valido");
+        files.push({ path: item, fileName: sanitizeName(mutopiaFiles.get(item).fileName), midiBase64: buffer.toString("base64") });
+      } catch (error) { errors.push({ path: item, error: error.message }); }
+    }
+    sendJson(res, files.length ? 200 : 502, { files, errors, error: files.length ? undefined : errors.map((entry) => entry.error).join('; ') });
+    return true;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/pianovera/catalog") {
+    try { sendJson(res, 200, { songs: await loadPianoveraCatalog() }); }
+    catch (error) { sendJson(res, 502, { error: error.message }); }
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/pianovera/fetch") {
+    const payload = await readBodyJson(req);
+    const paths = Array.isArray(payload.paths) ? payload.paths : [];
+    if (!paths.length || paths.length > 20 || paths.some((item) => typeof item !== "string" || item.length > 1024)) {
+      sendJson(res, 400, { error: "Seleziona da 1 a 20 MIDI validi" }); return true;
+    }
+    try {
+      const catalog = await loadPianoveraCatalog();
+      const byPath = new Map(catalog.map((song) => [song.path, song]));
+      if (paths.some((item) => !byPath.has(item))) { sendJson(res, 400, { error: "Il file non e presente nel catalogo PianoVera" }); return true; }
+      const files = [], errors = [];
+      for (const item of paths) {
+        try {
+          const response = await fetch(new URL(item, PIANOVERA_ORIGIN), { redirect: "error", signal: AbortSignal.timeout(30000) });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const buffer = await boundedRemoteBody(response, ARCHIVE_MAX_MIDI_BYTES);
+          if (buffer.subarray(0, 4).toString("ascii") !== "MThd") throw new Error("Il file non e un MIDI valido");
+          files.push({ path: item, fileName: byPath.get(item).fileName, midiBase64: buffer.toString("base64") });
+        } catch (error) { errors.push({ path: item, error: error.message }); }
+      }
+      sendJson(res, files.length ? 200 : 502, { files, errors, error: files.length ? undefined : errors.map((item) => item.error).join("; ") });
+    } catch (error) { sendJson(res, 502, { error: error.message }); }
+    return true;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/archive/search") {
+    const query = String(url.searchParams.get("q") || "").trim();
+    if (query.length < 2 || query.length > 120) {
+      sendJson(res, 400, { error: "Inserisci una ricerca da 2 a 120 caratteri" });
+      return true;
+    }
+    try {
+      const terms = query.replace(/[^\p{L}\p{N}\s-]/gu, " ").trim().split(/\s+/).filter(Boolean);
+      if (!terms.length) throw new Error("Inserisci parole valide per la ricerca");
+      const result = await archiveJson("/advancedsearch.php", { q: `${terms.map((term) => `"${term}"`).join(" AND ")} AND format:MIDI`, "fl[]": "identifier,title,creator", rows: "50", page: "1", output: "json" });
+      const collections = (result.response?.docs || []).filter((item) => archiveIdentifier(item.identifier)).map((item) => ({ identifier: item.identifier, title: String(item.title || item.identifier), creator: Array.isArray(item.creator) ? item.creator.join(", ") : String(item.creator || "") }));
+      sendJson(res, 200, { collections, total: result.response?.numFound || 0 });
+    } catch (error) { sendJson(res, 502, { error: error.message }); }
+    return true;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/archive/files") {
+    const identifier = archiveIdentifier(url.searchParams.get("id"));
+    if (!identifier) { sendJson(res, 400, { error: "Raccolta non valida" }); return true; }
+    try {
+      const data = await archiveJson(`/metadata/${encodeURIComponent(identifier)}`);
+      if (!data.metadata || data.metadata.access_restricted_item === "true") throw new Error("Raccolta non disponibile pubblicamente");
+      const titles = archiveDescriptionTitles(data.metadata.description, identifier);
+      const composer = archiveKnownComposer(data.metadata);
+      const songs = (data.files || []).filter((file) => archiveFilename(file.name) && file.private !== "true").map((file) => ({
+        path: JSON.stringify([identifier, file.name]), fileName: file.name.split("/").pop(),
+        title: titles.get(file.name) || file.name.split("/").pop().replace(/\.(mid|midi)$/i, ""), artist: composer, composer,
+        size: Number(file.size) || 0, sourcePageUrl: `${ARCHIVE_ORIGIN}/details/${encodeURIComponent(identifier)}`,
+      }));
+      sendJson(res, 200, { songs, title: data.metadata.title || identifier });
+    } catch (error) { sendJson(res, 502, { error: error.message }); }
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/archive/fetch") {
+    const payload = await readBodyJson(req);
+    const paths = Array.isArray(payload.paths) ? payload.paths : [];
+    if (!paths.length || paths.length > 20) { sendJson(res, 400, { error: "Seleziona da 1 a 20 MIDI" }); return true; }
+    const parsed = paths.map((item) => { try { const value = JSON.parse(item); return Array.isArray(value) && value.length === 2 && archiveIdentifier(value[0]) && archiveFilename(value[1]) ? value : null; } catch { return null; } });
+    if (parsed.some((item) => !item)) { sendJson(res, 400, { error: "Selezione non valida" }); return true; }
+    const files = [], errors = [];
+    for (let i = 0; i < paths.length; i++) {
+      const [identifier, filename] = parsed[i];
+      try {
+        const metadata = await archiveJson(`/metadata/${encodeURIComponent(identifier)}`);
+        const file = (metadata.files || []).find((entry) => entry.name === filename && entry.private !== "true");
+        if (!metadata.metadata || metadata.metadata.access_restricted_item === "true" || !file) throw new Error("File non disponibile pubblicamente");
+        if (Number(file.size) > ARCHIVE_MAX_MIDI_BYTES) throw new Error("MIDI troppo grande (massimo 10 MB)");
+        let target = new URL(`/download/${encodeURIComponent(identifier)}/${filename.split("/").map(encodeURIComponent).join("/")}`, ARCHIVE_ORIGIN);
+        let response;
+        for (let redirects = 0; redirects < 5; redirects++) {
+          if (target.protocol !== "https:" || !(target.hostname === "archive.org" || target.hostname.endsWith(".archive.org"))) throw new Error("Destinazione download non consentita");
+          response = await fetch(target, { redirect: "manual", signal: AbortSignal.timeout(30000) });
+          if (![301, 302, 303, 307, 308].includes(response.status)) break;
+          const location = response.headers.get("location");
+          if (!location) throw new Error("Reindirizzamento non valido");
+          target = new URL(location, target);
+          response = null;
+        }
+        if (!response?.ok) throw new Error(`Download non disponibile (HTTP ${response?.status || "redirect"})`);
+        if (Number(response.headers.get("content-length")) > ARCHIVE_MAX_MIDI_BYTES) throw new Error("MIDI troppo grande (massimo 10 MB)");
+        const chunks = []; let size = 0;
+        for await (const chunk of response.body) { size += chunk.length; if (size > ARCHIVE_MAX_MIDI_BYTES) throw new Error("MIDI troppo grande (massimo 10 MB)"); chunks.push(chunk); }
+        const buffer = Buffer.concat(chunks);
+        if (buffer.subarray(0, 4).toString("ascii") !== "MThd") throw new Error("Il file non e un MIDI valido");
+        files.push({ path: paths[i], fileName: sanitizeName(path.basename(filename)) || "archive.mid", midiBase64: buffer.toString("base64") });
+      } catch (error) { errors.push({ path: paths[i], error: error.message }); }
+    }
+    sendJson(res, files.length ? 200 : 502, { files, errors, error: files.length ? undefined : errors.map((item) => item.error).join("; ") });
     return true;
   }
 
@@ -1766,6 +2129,7 @@ async function handleApi(req, res, url) {
 
     const applySongCollections = (songId, collectionIds, favorite) => {
       if (Array.isArray(collectionIds)) {
+        if (Array.isArray(db.questPlaylistSync?.managedMemberships)) db.questPlaylistSync.managedMemberships = db.questPlaylistSync.managedMemberships.filter((item) => item.songId !== songId);
         const allowed = new Set(collectionIds);
         db.songCollection = db.songCollection.filter((sc) => {
           if (sc.songId !== songId) return true;
@@ -2061,6 +2425,7 @@ async function handleApi(req, res, url) {
     }
 
     if (Array.isArray(payload.collectionIds)) {
+      if (Array.isArray(db.questPlaylistSync?.managedMemberships)) db.questPlaylistSync.managedMemberships = db.questPlaylistSync.managedMemberships.filter((item) => item.songId !== songId);
       const allowed = new Set(payload.collectionIds);
       db.songCollection = db.songCollection.filter((sc) => {
         if (sc.songId !== songId) return true;
@@ -2078,6 +2443,7 @@ async function handleApi(req, res, url) {
     }
 
     if (Object.hasOwn(payload, "favorite")) {
+      if (Array.isArray(db.questFavoriteSync?.managedSongIds)) db.questFavoriteSync.managedSongIds = db.questFavoriteSync.managedSongIds.filter((id) => id !== songId);
       const has = db.songCollection.some((sc) => sc.songId === songId && sc.collectionId === "col-favorites");
       if (payload.favorite && !has) db.songCollection.push({ songId, collectionId: "col-favorites" });
       if (!payload.favorite && has) {

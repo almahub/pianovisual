@@ -14,7 +14,6 @@ const el = {
   scrollDownBtn: document.getElementById("scrollDownBtn"),
 
   navItems: document.querySelectorAll(".nav-item"),
-  studyChips: document.querySelectorAll("[data-study-filter]"),
   viewKicker: document.getElementById("viewKicker"),
   viewTitle: document.getElementById("viewTitle"),
   playlistCount: document.getElementById("playlistCount"),
@@ -23,6 +22,11 @@ const el = {
   pianoEngineStatus: document.getElementById("pianoEngineStatus"),
   importPanel: document.getElementById("importPanel"),
   remoteCatalogPanel: document.getElementById("remoteCatalogPanel"),
+  remoteKaraTab: document.getElementById("remoteKaraTab"),
+  remoteMutopiaTab: document.getElementById("remoteMutopiaTab"),
+  remoteMidiCollectionTab: document.getElementById("remoteMidiCollectionTab"),
+  remoteMoreBtn: document.getElementById("remoteMoreBtn"),
+  remoteSourceLink: document.getElementById("remoteSourceLink"),
   remoteCatalogSearch: document.getElementById("remoteCatalogSearch"),
   remoteCatalogSearchBtn: document.getElementById("remoteCatalogSearchBtn"),
   remoteCatalogClearBtn: document.getElementById("remoteCatalogClearBtn"),
@@ -77,6 +81,7 @@ const el = {
   questStatusBtn: document.getElementById("questStatusBtn"),
   questPullBtn: document.getElementById("questPullBtn"),
   questPushBtn: document.getElementById("questPushBtn"),
+  questCompareBtn: document.getElementById("questCompareBtn"),
   questStatusText: document.getElementById("questStatusText"),
   themeLightBtn: document.getElementById("themeLightBtn"),
   themeDarkBtn: document.getElementById("themeDarkBtn"),
@@ -213,7 +218,6 @@ const el = {
 const state = {
   db: null,
   view: "home",
-  studyFilter: "",
   selectedSongId: "",
   sort: { key: "importedAt", dir: "desc" },
   page: 1,
@@ -232,6 +236,11 @@ const state = {
   artistPhotos: new Map(),
   artistPhotosLoading: false,
   remoteCatalog: {
+    source: "kara",
+    mutopiaPage: 0,
+    mutopiaQuery: "",
+    mutopiaComposer: "",
+    sourceArtists: {},
     artists: [],
     songs: [],
     selectedPaths: new Set(),
@@ -1334,6 +1343,7 @@ function filteredSongs() {
   else if (state.view === "selectedVersions") list = list.filter((song) => song.variantType === "selected_instruments");
   else list = list.filter((song) => !["piano_reduction", "selected_instruments"].includes(song.variantType) && (song.midiAvailable || song.jsonAvailable !== false));
   if (state.view === "library") list = list.filter((song) => song.midiAvailable);
+  if (["artists", "genres"].includes(state.view)) list = list.filter((song) => song.midiAvailable);
   if (state.view === "legacyJson") list = list.filter((song) => !song.midiAvailable);
 
   if (state.view === "favorites") list = list.filter((s) => isFavorite(s.id));
@@ -1364,16 +1374,6 @@ function filteredSongs() {
   }
   if (state.view === "import" || state.view === "home") {
     list = [];
-  }
-
-  if (state.studyFilter) {
-    if (state.studyFilter === "recent") {
-      const now = Date.now();
-      const THIRTY = 30 * 24 * 60 * 60 * 1000;
-      list = list.filter((s) => now - new Date(s.importedAt).getTime() <= THIRTY);
-    } else {
-      list = list.filter((s) => practiceBySong(s.id)?.studyStatus === state.studyFilter);
-    }
   }
 
   if (q) {
@@ -1615,7 +1615,8 @@ function renderDirectoryPanel() {
 
   if (state.view === "genres") {
     const counts = new Map();
-    for (const song of songs) {
+    const midiSongs = songs.filter((song) => song.midiAvailable);
+    for (const song of midiSongs) {
       const g = genreForSong(song);
       if (!g) continue;
       const current = counts.get(g) || { count: 0, inProgress: 0, mastered: 0 };
@@ -1630,13 +1631,13 @@ function renderDirectoryPanel() {
         b[1].inProgress + b[1].mastered * 2 - (a[1].inProgress + a[1].mastered * 2) || b[1].count - a[1].count,
     );
     const smart = [
-      { name: "Classica lenta", count: songs.filter((s) => normalizeText(genreForSong(s)) === "classica" && Number(s.bpm || 0) < 90).length },
+      { name: "Classica lenta", count: midiSongs.filter((s) => normalizeText(genreForSong(s)) === "classica" && Number(s.bpm || 0) < 90).length },
       {
         name: "Studio intermedio",
-        count: songs.filter((s) => ["classica", "jazz", "soundtrack"].includes(normalizeText(genreForSong(s))) && s.difficulty === "intermedio")
+        count: midiSongs.filter((s) => ["classica", "jazz", "soundtrack"].includes(normalizeText(genreForSong(s))) && s.difficulty === "intermedio")
           .length,
       },
-      { name: "Energia alta", count: songs.filter((s) => Number(s.bpm || 0) >= 130).length },
+      { name: "Energia alta", count: midiSongs.filter((s) => Number(s.bpm || 0) >= 130).length },
     ].filter((x) => x.count > 0);
     el.playlistsSectionTitle.textContent = "Generi e Tag";
     const genreCards =
@@ -1665,7 +1666,7 @@ function renderDirectoryPanel() {
 
   if (state.view === "artists") {
     const byArtist = new Map();
-    for (const s of songs) {
+    for (const s of songs.filter((song) => song.midiAvailable)) {
       const name = (s.artist || "").trim();
       if (!name) continue;
       byArtist.set(name, (byArtist.get(name) || 0) + 1);
@@ -2126,12 +2127,8 @@ function selectNav(view) {
   if (view !== "genres") state.selectedGenre = "";
   if (view !== "artists") state.selectedArtist = "";
   for (const item of el.navItems) item.classList.toggle("active", item.dataset.view === view);
-  if (view !== "home") {
-    state.studyFilter = "";
-    for (const chip of el.studyChips) chip.classList.remove("active");
-  }
   render();
-  if (view === "remote" && !state.remoteCatalog.loaded) loadRemoteArtists();
+  if (view === "remote" && state.remoteCatalog.source === "kara" && !state.remoteCatalog.loaded) loadRemoteArtists();
   if (view === "reductions") loadPianoEngineStatus();
 }
 
@@ -2363,8 +2360,8 @@ function renderRemoteArtists(artists = state.remoteCatalog.artists) {
   el.remoteArtistsWrap.innerHTML = artists.length
     ? artists
         .map(
-          (artist) => `<button class="remote-artist-card" type="button" data-remote-artist="${escapeHtml(artist.path)}">
-            <span>🎤</span><strong>${escapeHtml(artist.name)}</strong><small>Apri brani</small>
+          (artist) => `<button class="remote-artist-card" type="button" data-remote-artist="${escapeHtml(artist.path)}" data-remote-name="${escapeHtml(artist.name)}">
+            <span>🎤</span><strong>${escapeHtml(artist.name)}</strong><small>${Number.isInteger(artist.count) ? `${artist.count} MIDI indicizzati` : "Apri brani"}</small>
           </button>`,
         )
         .join("")
@@ -2394,6 +2391,7 @@ async function loadRemoteArtists() {
     const result = await api("/api/remote-catalog/artists");
     state.remoteCatalog.artists = Array.isArray(result.artists) ? result.artists : [];
     state.remoteCatalog.loaded = true;
+    if (state.remoteCatalog.source !== "kara") return;
     state.remoteCatalog.currentArtist = "";
     state.remoteCatalog.songs = [];
     state.remoteCatalog.selectedPaths.clear();
@@ -2410,6 +2408,7 @@ async function openRemoteArtist(artistPath) {
   setRemoteCatalogStatus(`Caricamento brani di ${artistPath}...`);
   try {
     const result = await api(`/api/remote-catalog/songs?artist=${encodeURIComponent(artistPath)}`);
+    if (state.remoteCatalog.source !== "kara") return;
     state.remoteCatalog.currentArtist = artistPath;
     state.remoteCatalog.songs = Array.isArray(result.songs) ? result.songs : [];
     state.remoteCatalog.selectedPaths.clear();
@@ -2424,6 +2423,23 @@ async function openRemoteArtist(artistPath) {
 
 async function searchRemoteCatalog() {
   const query = el.remoteCatalogSearch.value.trim();
+  if (["mutopia", "midiCollection"].includes(state.remoteCatalog.source)) {
+    if (!query) { switchRemoteSource(state.remoteCatalog.source); return; }
+    state.remoteCatalog.songs = [];
+    state.remoteCatalog.selectedPaths.clear();
+    state.remoteCatalog.currentArtist = "";
+    state.remoteCatalog.mutopiaComposer = "";
+    state.remoteCatalog.mutopiaQuery = query;
+    state.remoteCatalog.mutopiaPage = state.remoteCatalog.source === "mutopia" ? 0 : 1;
+    renderRemoteSongs();
+    const artists = state.remoteCatalog.sourceArtists[state.remoteCatalog.source] || [];
+    renderRemoteArtists(artists.filter((artist) => normalizeText(artist.name).includes(normalizeText(query))));
+    el.remoteCatalogBackBtn.classList.remove("hidden");
+    el.remoteMoreBtn.classList.add("hidden");
+    if (query.length < 2) { setRemoteCatalogStatus("Inserisci almeno 2 caratteri.", "error"); return; }
+    await loadPagedRemoteResults(state.remoteCatalog.mutopiaPage, query, state.remoteCatalog.source);
+    return;
+  }
   if (!query) {
     renderRemoteArtists();
     state.remoteCatalog.songs = [];
@@ -2441,6 +2457,7 @@ async function searchRemoteCatalog() {
     if (!state.remoteCatalog.loaded) await loadRemoteArtists();
     const matchingArtists = state.remoteCatalog.artists.filter((artist) => normalizeText(artist.name).includes(normalizeText(query)));
     const result = await api(`/api/remote-catalog/search?q=${encodeURIComponent(query)}`);
+    if (state.remoteCatalog.source !== "kara") return;
     state.remoteCatalog.currentArtist = "";
     state.remoteCatalog.songs = Array.isArray(result.songs) ? result.songs : [];
     state.remoteCatalog.selectedPaths.clear();
@@ -2467,7 +2484,8 @@ async function prepareRemoteSelection(importAfterConversion = false) {
   showLoading(true);
   setRemoteCatalogStatus(`Download su richiesta di ${selectedSongs.length} MIDI...`);
   try {
-    const result = await api("/api/remote-catalog/fetch", {
+    const fetchEndpoint = { mutopia: "/api/mutopia/fetch", midiCollection: "/api/midi-collection/fetch", kara: "/api/remote-catalog/fetch" }[state.remoteCatalog.source];
+    const result = await api(fetchEndpoint, {
       method: "POST",
       body: JSON.stringify({ paths: selectedSongs.map((song) => song.path) }),
     });
@@ -2488,6 +2506,8 @@ async function prepareRemoteSelection(importAfterConversion = false) {
         seenTitleArtist,
         titleOverride: remoteSong?.title || "",
         artistOverride: remoteSong?.artist || "",
+        composerOverride: remoteSong?.composer || "",
+        useFormMetadata: false,
       });
       state.batchItems.push(item);
       inferredLines.push(inferredLine);
@@ -2531,13 +2551,15 @@ async function buildBatchItemFromArrayBuffer({
   seenTitleArtist,
   titleOverride = "",
   artistOverride = "",
+  composerOverride = "",
+  useFormMetadata = true,
 }) {
   const fileHash = await sha256Hex(arrBuffer);
   const midi = new Midi(arrBuffer);
   const baseName = sourceName.replace(/\.(mid|midi)$/i, "");
-  const artist = repairMojibake(artistOverride || el.metaArtist.value.trim());
-  const title = titleWithoutArtist(repairMojibake(titleOverride || el.metaTitle.value.trim() || baseName), artist);
-  const composer = repairMojibake(el.metaComposer.value.trim());
+  const artist = repairMojibake(artistOverride || (useFormMetadata ? el.metaArtist.value.trim() : ""));
+  const title = titleWithoutArtist(repairMojibake(titleOverride || (useFormMetadata ? el.metaTitle.value.trim() : "") || baseName), artist);
+  const composer = repairMojibake(composerOverride || (useFormMetadata ? el.metaComposer.value.trim() : ""));
   const genre = repairMojibake(el.metaGenre.value.trim());
   const mergedTags = parseTagsInput(el.metaTags.value);
   const finalKey = midiMainKey(midi);
@@ -3003,6 +3025,86 @@ function filterJsonByActiveInstruments(jsonData, song, activeInstruments, includ
   }
 
   return clone;
+}
+
+async function loadSourceArtistList(source) {
+  let artists = state.remoteCatalog.sourceArtists[source];
+  if (!artists) {
+    setRemoteCatalogStatus("Caricamento artisti...");
+    try {
+      const endpoint = source === "mutopia" ? "/api/mutopia/artists" : "/api/midi-collection/artists";
+      const result = await api(endpoint);
+      artists = result.artists || [];
+      state.remoteCatalog.sourceArtists[source] = artists;
+    } catch (error) { if (state.remoteCatalog.source === source) setRemoteCatalogStatus(error.message, "error"); return; }
+  }
+  if (state.remoteCatalog.source !== source || state.remoteCatalog.currentArtist || el.remoteCatalogSearch.value.trim()) return;
+  renderRemoteArtists(artists);
+  setRemoteCatalogStatus(source === "mutopia" ? `${artists.length} compositori disponibili.` : `${artists.length} artisti indicizzati; altri MIDI sono disponibili con la ricerca.`, "ok");
+}
+
+async function openSourceArtist(path, name) {
+  const source = state.remoteCatalog.source;
+  state.remoteCatalog.songs = [];
+  state.remoteCatalog.selectedPaths.clear();
+  state.remoteCatalog.currentArtist = name;
+  state.remoteCatalog.mutopiaComposer = source === "mutopia" ? path : "";
+  state.remoteCatalog.mutopiaQuery = "";
+  state.remoteCatalog.mutopiaPage = 0;
+  el.remoteArtistsWrap.innerHTML = "";
+  el.remoteMoreBtn.classList.add("hidden");
+  el.remoteCatalogBackBtn.classList.remove("hidden");
+  renderRemoteSongs();
+  if (source === "mutopia") { await loadPagedRemoteResults(0, "", source); return; }
+  setRemoteCatalogStatus(`Caricamento MIDI di ${name}...`);
+  try {
+    const result = await api(`/api/midi-collection/artist?path=${encodeURIComponent(path)}&name=${encodeURIComponent(name)}`);
+    if (state.remoteCatalog.source !== source || state.remoteCatalog.currentArtist !== name) return;
+    state.remoteCatalog.songs = result.songs || [];
+    renderRemoteSongs();
+    setRemoteCatalogStatus(`${state.remoteCatalog.songs.length} MIDI caricati per ${name}; ${result.expectedCount} indicizzati dalla fonte.`, "ok");
+  } catch (error) { if (state.remoteCatalog.source === source) setRemoteCatalogStatus(error.message, "error"); }
+}
+
+async function loadPagedRemoteResults(page, query, source) {
+  const label = source === "mutopia" ? "Mutopia" : "MIDI Collection";
+  const endpoint = source === "mutopia" ? "/api/mutopia/search" : "/api/midi-collection/search";
+  setRemoteCatalogStatus(`Ricerca ${label}: "${query || state.remoteCatalog.currentArtist}"...`);
+  el.remoteMoreBtn.disabled = true;
+  try {
+    const composer = source === "mutopia" ? state.remoteCatalog.mutopiaComposer : "";
+    const result = await api(`${endpoint}?q=${encodeURIComponent(query)}&page=${page}${composer ? `&composer=${encodeURIComponent(composer)}` : ""}`);
+    if (state.remoteCatalog.source !== source || state.remoteCatalog.mutopiaQuery !== query || (source === "mutopia" && state.remoteCatalog.mutopiaComposer !== composer)) return;
+    const existing = new Set(state.remoteCatalog.songs.map((song) => song.path));
+    state.remoteCatalog.songs.push(...(result.songs || []).filter((song) => !existing.has(song.path)));
+    state.remoteCatalog.mutopiaPage = page;
+    el.remoteMoreBtn.classList.toggle("hidden", !result.hasMore);
+    renderRemoteSongs();
+    const count = Number.isInteger(result.total) ? `${state.remoteCatalog.songs.length} MIDI caricati su ${result.total} risultati dichiarati` : `${state.remoteCatalog.songs.length} MIDI caricati`;
+    setRemoteCatalogStatus(`${count}${result.hasMore ? "; altri risultati disponibili" : "; fine dei risultati"}.`, "ok");
+  } catch (error) { if (state.remoteCatalog.source === source) setRemoteCatalogStatus(error.message, "error"); }
+  finally { el.remoteMoreBtn.disabled = false; }
+}
+
+function switchRemoteSource(source) {
+  state.remoteCatalog.source = source;
+  state.remoteCatalog.songs = [];
+  state.remoteCatalog.selectedPaths.clear();
+  state.remoteCatalog.mutopiaQuery = "";
+  state.remoteCatalog.mutopiaComposer = "";
+  state.remoteCatalog.currentArtist = "";
+  el.remoteCatalogSearch.value = "";
+  el.remoteCatalogBackBtn.classList.add("hidden");
+  el.remoteMoreBtn.classList.add("hidden");
+  el.remoteSourceLink.href = { mutopia: "https://www.mutopiaproject.org/", midiCollection: "https://midicollection.com/", kara: "https://ftp.karapertutti.altervista.org/browser.php" }[source];
+  for (const [tab, active] of [[el.remoteKaraTab, source === "kara"], [el.remoteMutopiaTab, source === "mutopia"], [el.remoteMidiCollectionTab, source === "midiCollection"]]) {
+    tab.setAttribute("aria-selected", String(active));
+    tab.classList.toggle("subtle", !active);
+  }
+  renderRemoteSongs();
+  if (source === "mutopia" || source === "midiCollection") { el.remoteArtistsWrap.innerHTML = ""; loadSourceArtistList(source); }
+  else if (state.remoteCatalog.loaded) { renderRemoteArtists(); setRemoteCatalogStatus(`${state.remoteCatalog.artists.length} artisti disponibili.`, "ok"); }
+  else loadRemoteArtists();
 }
 
 function jsonWithSongMetadata(jsonData, song) {
@@ -3943,9 +4045,7 @@ function resetFilters() {
   el.keyFilter.value = "";
   el.difficultyFilter.value = "";
   el.durationFilter.value = "";
-  state.studyFilter = "";
   state.page = 1;
-  for (const chip of el.studyChips) chip.classList.remove("active");
   render();
 }
 
@@ -4436,6 +4536,7 @@ async function importJsonFolder() {
 async function checkQuestStatus() {
   el.questPullBtn.disabled = true;
   el.questPushBtn.disabled = true;
+  el.questCompareBtn.disabled = true;
   if (!window.pianovisualDesktop?.questStatus) {
     setQuestStatus("Sincronizzazione Quest disponibile solo nell'app desktop.", "error");
     return;
@@ -4449,10 +4550,146 @@ async function checkQuestStatus() {
     }
     el.questPullBtn.disabled = false;
     el.questPushBtn.disabled = false;
+    el.questCompareBtn.disabled = false;
     setQuestStatus(`Quest collegato (${result.serial}) - ${result.jsonCount} JSON sul dispositivo`, "ok");
   } catch (error) {
     setQuestStatus(error.message, "error");
   }
+}
+
+async function compareQuestCollections() {
+  if (!window.pianovisualDesktop?.questCompareCollections) { setQuestStatus("Confronto disponibile solo nell'app desktop.", "error"); return; }
+  showLoading(true);
+  setQuestStatus("Confronto delle raccolte in corso...");
+  try {
+    const result = await window.pianovisualDesktop.questCompareCollections();
+    showQuestComparison(result);
+    setQuestStatus("Confronto completato senza modifiche.", "ok");
+  } catch (error) {
+    setQuestStatus(`Confronto non riuscito: ${error.message}`, "error");
+    toast(error.message, "error");
+  } finally { showLoading(false); }
+}
+
+function showQuestComparison(result) {
+  const labels = { identical: "JSON identico", possible: "Corrispondenza possibile", ambiguous: "Più corrispondenze", missing: "Nessuna corrispondenza" };
+  const origin = { imported: "JSON importato", catalog: "Catalogo PianoVision", unknown: "Origine non disponibile" };
+  const renderSong = (song) => `<li><strong>${escapeHtml(song.title || `Brano #${song.pieceId}`)}</strong> <span>${escapeHtml(song.artist || "")}</span><br><small>${escapeHtml(origin[song.origin] || origin.unknown)} · ${escapeHtml(labels[song.match] || song.match)}</small>${song.candidates.length ? `<ul>${song.candidates.map((candidate) => `<li>${escapeHtml(candidate.title)} · ${escapeHtml(candidate.artist || "Autore non indicato")}${candidate.variantType ? ` · ${escapeHtml(candidate.variantType)}` : ""} · ${candidate.favorite ? "Preferito in PianoVisual" : "Non preferito in PianoVisual"}${candidate.playlists.length ? ` · Playlist: ${escapeHtml(candidate.playlists.join(", "))}` : ""}</li>`).join("")}</ul>` : ""}</li>`;
+  const favoriteMarkup = result.favorites.length ? `<ul>${result.favorites.map((song) => `<li><strong>${escapeHtml(song.profileName)}</strong><ul>${renderSong(song)}</ul></li>`).join("")}</ul>` : "<p>Nessun preferito sul Quest.</p>";
+  const playlistMarkup = result.playlists.length ? result.playlists.map((list) => `<section><h3>${escapeHtml(list.name)} <small>· ${escapeHtml(list.profileName)}</small></h3><p>${list.localPlaylists.length ? `Playlist locali con lo stesso nome: ${escapeHtml(list.localPlaylists.map((item) => item.name).join(", "))}` : "Nessuna playlist locale con lo stesso nome."}</p>${list.songs.length ? `<ul>${list.songs.map(renderSong).join("")}</ul>` : "<p>Playlist vuota.</p>"}</section>`).join("") : "<p>Nessuna playlist sul Quest.</p>";
+  const dialog = document.createElement("dialog");
+  dialog.className = "quest-file-dialog quest-comparison-dialog";
+  dialog.setAttribute("aria-labelledby", "questComparisonTitle");
+  dialog.innerHTML = `<h2 id="questComparisonTitle">Confronto Quest e PianoVisual</h2><p>Titoli e autori uguali non garantiscono lo stesso arrangiamento.</p><h3>Preferiti</h3>${favoriteMarkup}<section><h3>Sincronizza preferiti dal Quest</h3><label>Profilo <select data-sync-profile><option value="">Seleziona profilo</option>${(result.profiles || []).map((profile) => `<option value="${profile.id}">${escapeHtml(profile.name || `Profilo ${profile.id}`)}</option>`).join("")}</select></label><div data-sync-matches></div><p class="mini-note">I preferiti locali preesistenti non vengono eliminati. Le corrispondenze non verificate richiedono una scelta.</p><button class="btn" type="button" data-sync disabled>Anteprima sincronizzazione</button></section><h3>Playlist</h3>${playlistMarkup}<section><h3>Sincronizza playlist dal Quest</h3><label>Playlist Quest <select data-playlist-source><option value="">Seleziona playlist</option>${result.playlists.map((list, index) => `<option value="${index}">${escapeHtml(list.name)} · ${escapeHtml(list.profileName)}</option>`).join("")}</select></label><div data-playlist-options></div><p class="mini-note">Le playlist e i brani locali aggiunti manualmente non vengono eliminati. Una playlist eliminata sul Quest non viene cancellata automaticamente qui.</p><button class="btn" type="button" data-playlist-sync disabled>Anteprima sincronizzazione playlist</button></section><section><h3>Invia playlist al Quest</h3><label class="quest-sync-match">Profilo Quest<select data-out-profile><option value="">Seleziona profilo</option>${(result.profiles || []).map((profile) => `<option value="${profile.id}">${escapeHtml(profile.name || `Profilo ${profile.id}`)}</option>`).join("")}</select></label><label class="quest-sync-match">Playlist PianoVisual<select data-out-local><option value="">Seleziona playlist</option>${(result.localManualPlaylists || []).map((list) => `<option value="${escapeHtml(list.id)}">${escapeHtml(list.name)}</option>`).join("")}</select></label><p class="mini-note">Chiudi PianoVision sul Quest. Sono associabili solo JSON già presenti e indicizzati sul visore, identici a quelli locali.</p><button class="btn" type="button" data-out-preview>Confronta brani da inviare</button><div data-out-results></div></section><div class="quest-file-actions"><button class="btn" type="button" data-close>Chiudi</button></div>`;
+  document.body.append(dialog);
+  dialog.querySelector("[data-close]").addEventListener("click", () => dialog.close());
+  const profileSelect = dialog.querySelector("[data-sync-profile]");
+  const matches = dialog.querySelector("[data-sync-matches]");
+  const syncBtn = dialog.querySelector("[data-sync]");
+  profileSelect.addEventListener("change", () => {
+    const profileId = Number(profileSelect.value);
+    syncBtn.disabled = !profileId;
+    const songs = result.favorites.filter((song) => song.profileId === profileId);
+    matches.innerHTML = songs.length ? songs.map((song) => {
+      const saved = (result.syncBindings || []).find((item) => item.profileId === profileId && item.pieceId === song.pieceId);
+      const defaultId = saved?.songId || (song.match === "identical" && song.candidates.length === 1 ? song.candidates[0].id : "");
+      return `<label class="quest-sync-match"><strong>${escapeHtml(song.title || `Brano #${song.pieceId}`)} · ${escapeHtml(song.artist || "")}</strong><select data-sync-piece="${song.pieceId}"><option value="">Nessun nuovo collegamento</option>${song.candidates.map((candidate) => `<option value="${escapeHtml(candidate.id)}" ${candidate.id === defaultId ? "selected" : ""}>${escapeHtml(candidate.title)} · ${escapeHtml(candidate.artist || "Autore non indicato")}${candidate.variantType ? ` · ${escapeHtml(candidate.variantType)}` : ""}</option>`).join("")}</select><small>${escapeHtml(labels[song.match] || song.match)}${saved && !song.candidates.some((item) => item.id === saved.songId) ? " · collegamento precedente conservato" : ""}</small></label>`;
+    }).join("") : profileId ? "<p>Nessun preferito nel profilo: l'anteprima mostrerà eventuali rimozioni gestite.</p>" : "";
+  });
+  syncBtn.addEventListener("click", async () => {
+    const profileId = Number(profileSelect.value);
+    const favorites = result.favorites.filter((song) => song.profileId === profileId);
+    const choices = [...matches.querySelectorAll("[data-sync-piece]")].filter((select) => select.value).map((select) => ({ pieceId: Number(select.dataset.syncPiece), songId: select.value }));
+    const payload = { device: result.serial, profileId, remoteIds: favorites.map((song) => song.pieceId), choices };
+    syncBtn.disabled = true;
+    try {
+      const plan = await api("/api/quest/favorites-plan", { method: "POST", body: JSON.stringify(payload) });
+      const lines = (items) => items.length ? items.map((item) => `- ${item.title} · ${item.artist || "Autore non indicato"}`).join("\n") : "- Nessuno";
+      const links = choices.map((choice) => {
+        const remote = favorites.find((song) => song.pieceId === choice.pieceId);
+        const local = remote?.candidates.find((candidate) => candidate.id === choice.songId);
+        return `- ${remote?.title || choice.pieceId} → ${local?.title || choice.songId}`;
+      });
+      if (!confirm(`Sincronizzazione dal Quest verso PianoVisual\n\nCollegamenti selezionati:\n${links.join("\n") || "- Nessuno"}\n\nDa aggiungere ai preferiti:\n${lines(plan.added)}\n\nDa rimuovere dai preferiti gestiti:\n${lines(plan.removed)}\n\nI file musicali e il gioco non verranno modificati. Continuare?`)) return;
+      const applied = await window.pianovisualDesktop.questApplyFavoriteSync({ serial: result.serial, snapshot: result.snapshot, profileId, choices, revision: plan.revision });
+      await refreshDb();
+      render();
+      dialog.close();
+      setQuestStatus(`Preferiti sincronizzati: ${applied.added} aggiunti, ${applied.removed} rimossi.`, "ok");
+    } catch (error) { setQuestStatus(`Sincronizzazione non riuscita: ${error.message}`, "error"); toast(error.message, "error"); }
+    finally { syncBtn.disabled = !profileSelect.value; }
+  });
+  const playlistSource = dialog.querySelector("[data-playlist-source]");
+  const playlistOptions = dialog.querySelector("[data-playlist-options]");
+  const playlistBtn = dialog.querySelector("[data-playlist-sync]");
+  playlistSource.addEventListener("change", () => {
+    const list = playlistSource.value === "" ? null : result.playlists[Number(playlistSource.value)];
+    playlistBtn.disabled = !list;
+    if (!list) { playlistOptions.innerHTML = ""; return; }
+    const saved = (result.playlistBindings || []).find((item) => item.profileId === list.profileId && item.playlistId === list.id);
+    const boundLocal = (result.localManualPlaylists || []).find((item) => item.id === saved?.localId);
+    const sameName = (result.localManualPlaylists || []).some((item) => normalizeText(item.name) === normalizeText(list.name));
+    const localOptions = boundLocal ? [boundLocal] : (result.localManualPlaylists || []);
+    const listSelect = `<label class="quest-sync-match">Playlist in PianoVisual<select data-playlist-local>${boundLocal ? "" : '<option value="">Seleziona destinazione</option>'}${!boundLocal && !sameName ? `<option value="__create__">Crea: ${escapeHtml(list.name)}</option>` : ""}${localOptions.map((local) => `<option value="${escapeHtml(local.id)}" ${boundLocal?.id === local.id ? "selected" : ""}>${escapeHtml(local.name)}</option>`).join("")}</select>${boundLocal ? "<small>Playlist già collegata.</small>" : "<small>Seleziona esplicitamente una playlist esistente oppure creane una nuova.</small>"}</label>`;
+    const songSelects = list.songs.map((song) => {
+      const old = saved?.pieces?.find((piece) => piece.pieceId === song.pieceId);
+      const defaultId = old?.songId || (song.match === "identical" && song.candidates.length === 1 ? song.candidates[0].id : "");
+      return `<label class="quest-sync-match"><strong>${escapeHtml(song.title || `Brano #${song.pieceId}`)} · ${escapeHtml(song.artist || "")}</strong><select data-playlist-piece="${song.pieceId}"><option value="">Nessun nuovo collegamento</option>${song.candidates.map((candidate) => `<option value="${escapeHtml(candidate.id)}" ${candidate.id === defaultId ? "selected" : ""}>${escapeHtml(candidate.title)} · ${escapeHtml(candidate.artist || "Autore non indicato")}${candidate.variantType ? ` · ${escapeHtml(candidate.variantType)}` : ""}</option>`).join("")}</select><small>${escapeHtml(labels[song.match] || song.match)}${old && !song.candidates.some((item) => item.id === old.songId) ? " · collegamento precedente conservato" : ""}</small></label>`;
+    }).join("");
+    playlistOptions.innerHTML = listSelect + (songSelects || "<p>Playlist Quest vuota.</p>");
+  });
+  playlistBtn.addEventListener("click", async () => {
+    const list = result.playlists[Number(playlistSource.value)];
+    const localId = playlistOptions.querySelector("[data-playlist-local]")?.value || "";
+    if (!list || !localId) { toast("Seleziona una playlist di destinazione", "error"); return; }
+    const choices = [...playlistOptions.querySelectorAll("[data-playlist-piece]")].filter((select) => select.value).map((select) => ({ pieceId: Number(select.dataset.playlistPiece), songId: select.value }));
+    const payload = { device: result.serial, profileId: list.profileId, playlistId: list.id, playlistName: list.name, localId, remoteIds: list.songs.map((song) => song.pieceId), choices };
+    playlistBtn.disabled = true;
+    try {
+      const plan = await api("/api/quest/playlist-plan", { method: "POST", body: JSON.stringify(payload) });
+      const lines = (items) => items.length ? items.map((item) => `- ${item.title} · ${item.artist || "Autore non indicato"}`).join("\n") : "- Nessuno";
+      const links = choices.map((choice) => { const remote = list.songs.find((song) => song.pieceId === choice.pieceId); const local = remote?.candidates.find((candidate) => candidate.id === choice.songId); return `- ${remote?.title || choice.pieceId} → ${local?.title || choice.songId}`; });
+      if (!confirm(`Sincronizzazione playlist dal Quest verso PianoVisual\n\n${plan.create ? "Da creare" : "Destinazione"}: ${plan.playlistName}\n\nCollegamenti selezionati:\n${links.join("\n") || "- Nessuno"}\n\nBrani da aggiungere:\n${lines(plan.added)}\n\nBrani gestiti da rimuovere dalla playlist:\n${lines(plan.removed)}\n\nI brani locali aggiunti manualmente, i file musicali e il gioco non saranno modificati. Continuare?`)) return;
+      const applied = await window.pianovisualDesktop.questApplyPlaylistSync({ serial: result.serial, snapshot: result.playlistSnapshot, profileId: list.profileId, playlistId: list.id, localId, choices, revision: plan.revision });
+      await refreshDb(); render(); dialog.close();
+      setQuestStatus(`Playlist sincronizzata: ${applied.added} brani aggiunti, ${applied.removed} rimossi dalla playlist.`, "ok");
+    } catch (error) { setQuestStatus(`Sincronizzazione playlist non riuscita: ${error.message}`, "error"); toast(error.message, "error"); }
+    finally { playlistBtn.disabled = playlistSource.value === ""; }
+  });
+  const outProfile = dialog.querySelector("[data-out-profile]");
+  const outLocal = dialog.querySelector("[data-out-local]");
+  const outResults = dialog.querySelector("[data-out-results]");
+  const outPreview = dialog.querySelector("[data-out-preview]");
+  for (const select of [outProfile, outLocal]) select.addEventListener("change", () => { outResults.innerHTML = ""; });
+  outPreview.addEventListener("click", async () => {
+    const profileId = Number(outProfile.value), localId = outLocal.value;
+    if (!profileId || !localId) { toast("Seleziona profilo e playlist", "error"); return; }
+    outPreview.disabled = true;
+    try {
+      const preview = await window.pianovisualDesktop.questPreviewOutgoingPlaylist({ profileId, localId });
+      if (Number(outProfile.value) !== profileId || outLocal.value !== localId || !dialog.open) return;
+      const sameName = preview.profilePlaylists.some((item) => normalizeText(item.name) === normalizeText(preview.playlistName));
+      outResults.innerHTML = `<label class="quest-sync-match">Destinazione sul Quest<select data-out-destination><option value="">Seleziona destinazione</option>${sameName ? "" : `<option value="0">Crea: ${escapeHtml(preview.playlistName)}</option>`}${preview.profilePlaylists.map((item) => `<option value="${item.id}">Aggiungi a: ${escapeHtml(item.name)}</option>`).join("")}</select></label>${preview.songs.map((song) => `<label class="quest-sync-match"><strong>${escapeHtml(song.title)} · ${escapeHtml(song.artist || "")}</strong>${song.candidates.length ? `<select data-out-song="${escapeHtml(song.id)}"><option value="">Non inviare</option>${song.candidates.map((piece) => `<option value="${piece.pieceId}" ${song.candidates.length === 1 ? "selected" : ""}>${escapeHtml(piece.title)} · ${escapeHtml(piece.artist || "")} (JSON identico)</option>`).join("")}</select>` : "<small>JSON identico non trovato o non ancora indicizzato sul Quest.</small>"}</label>`).join("") || "<p>Playlist locale vuota.</p>"}<button class="btn" type="button" data-out-send>Invia playlist al Quest</button>`;
+      outResults.querySelector("[data-out-send]").addEventListener("click", async (event) => {
+        const value = outResults.querySelector("[data-out-destination]").value;
+        if (value === "") { toast("Seleziona la destinazione sul Quest", "error"); return; }
+        const choices = [...outResults.querySelectorAll("[data-out-song]")].filter((select) => select.value).map((select) => ({ songId: select.dataset.outSong, pieceId: Number(select.value) }));
+        const missing = preview.songs.length - choices.length;
+        const destinationId = Number(value);
+        const target = destinationId ? preview.profilePlaylists.find((item) => item.id === destinationId)?.name : preview.playlistName;
+        if (!confirm(`Inviare la playlist a PianoVision?\n\nDestinazione: ${target}\nBrani selezionati: ${choices.length}\nBrani non associati: ${missing}\n\nPianoVision deve rimanere chiuso. Sarà creato un backup locale del database; le playlist esistenti non verranno cancellate. Un'interruzione USB durante la scrittura può richiedere il ripristino manuale. Continuare?`)) return;
+        event.currentTarget.disabled = true;
+        try {
+          const sent = await window.pianovisualDesktop.questSendOutgoingPlaylist({ token: preview.token, destinationId, choices });
+          setQuestStatus(`Playlist inviata: ${sent.added} brani aggiunti, ${sent.skipped} non associati.`, "ok");
+          outResults.innerHTML = `<p>Operazione completata. Backup del database: ${escapeHtml(sent.backupPath)}</p>`;
+        } catch (error) { setQuestStatus(`Invio playlist non riuscito: ${error.message}`, "error"); toast(error.message, "error"); event.currentTarget.disabled = false; }
+      });
+    } catch (error) { outResults.innerHTML = ""; setQuestStatus(`Anteprima playlist non riuscita: ${error.message}`, "error"); toast(error.message, "error"); }
+    finally { outPreview.disabled = false; }
+  });
+  dialog.addEventListener("close", () => dialog.remove());
+  dialog.showModal();
 }
 
 async function importJsonFromQuest() {
@@ -4486,26 +4723,30 @@ async function pushJsonToQuest() {
     setQuestStatus("Invio al Quest disponibile solo nell'app desktop.", "error");
     return;
   }
+  const labeled = await chooseQuestVersionMode();
+  if (labeled === null) return;
   showLoading(true);
   setQuestStatus("Confronto libreria con Quest...");
   try {
-    const preview = await window.pianovisualDesktop.questPreviewPush();
+    const preview = await window.pianovisualDesktop.questPreviewPush(labeled);
     const files = Array.isArray(preview?.files) ? preview.files : [];
-    const summary = preview?.summary || { new: 0, changed: 0, same: 0 };
     if (!files.length) {
       setQuestStatus("Nessun JSON disponibile nella libreria.");
       return;
     }
     showLoading(false);
-    const toCopy = await chooseQuestFiles(files, summary);
+    const toCopy = await chooseQuestFiles(files);
     if (!toCopy.length) {
       setQuestStatus("Invio annullato dopo l'anteprima.");
       return;
     }
     const changed = toCopy.filter((item) => item.status === "changed").length;
-    if (changed && !confirm(`${changed} file presenti sul Quest saranno sovrascritti. Continuare?`)) return;
+    if (changed && !confirm(`${changed} file presenti sul Quest saranno sovrascritti. Continuare?`)) {
+      setQuestStatus("Invio annullato: nessun file sovrascritto.");
+      return;
+    }
     showLoading(true);
-    const result = await window.pianovisualDesktop.questPushJson(toCopy.map(({ id, localHash, remoteHash }) => ({ id, localHash, remoteHash })));
+    const result = await window.pianovisualDesktop.questPushJson(toCopy.map(({ id, localHash, remoteHash }) => ({ id, localHash, remoteHash })), preview.serial, labeled);
     const failures = Array.isArray(result?.errors) ? result.errors.length : 0;
     setQuestStatus(`${result.copied || 0} JSON verificati sul Quest${failures ? ` · ${failures} errori: ${result.errors.map((item) => `${item.fileName}: ${item.error}`).join("; ")}` : ""}.`, failures ? "error" : "ok");
     toast(`Sincronizzazione Quest: ${result.copied || 0} file copiati`, failures ? "error" : "ok");
@@ -4595,24 +4836,6 @@ function bindEvents() {
   if (el.scrollDownBtn) el.scrollDownBtn.addEventListener("click", () => scrollMainBy(420));
 
   el.navItems.forEach((item) => item.addEventListener("click", () => selectNav(item.dataset.view)));
-
-  el.studyChips.forEach((chip) => {
-    chip.addEventListener("click", () => {
-      const filter = chip.dataset.studyFilter;
-      if (state.studyFilter === filter) {
-        state.studyFilter = "";
-        chip.classList.remove("active");
-      } else {
-        state.studyFilter = filter;
-        for (const c of el.studyChips) c.classList.remove("active");
-        chip.classList.add("active");
-      }
-      state.view = "home";
-      for (const item of el.navItems) item.classList.toggle("active", item.dataset.view === "home");
-      state.page = 1;
-      render();
-    });
-  });
 
   el.searchInput.addEventListener("input", () => {
     state.page = 1;
@@ -4763,7 +4986,9 @@ function bindEvents() {
 
   el.remoteArtistsWrap.addEventListener("click", (event) => {
     const button = event.target.closest("[data-remote-artist]");
-    if (button) openRemoteArtist(button.dataset.remoteArtist);
+    if (!button) return;
+    if (state.remoteCatalog.source === "kara") openRemoteArtist(button.dataset.remoteArtist);
+    else openSourceArtist(button.dataset.remoteArtist, button.dataset.remoteName);
   });
   el.remoteSongsBody.addEventListener("change", (event) => {
     const checkbox = event.target.closest("[data-remote-song-path]");
@@ -4789,9 +5014,11 @@ function bindEvents() {
   });
   el.remoteCatalogClearBtn.addEventListener("click", () => {
     el.remoteCatalogSearch.value = "";
-    loadRemoteArtists();
+    if (["mutopia", "midiCollection"].includes(state.remoteCatalog.source)) switchRemoteSource(state.remoteCatalog.source);
+    else loadRemoteArtists();
   });
   el.remoteCatalogBackBtn.addEventListener("click", () => {
+    if (state.remoteCatalog.source !== "kara") { switchRemoteSource(state.remoteCatalog.source); return; }
     el.remoteCatalogSearch.value = "";
     state.remoteCatalog.currentArtist = "";
     state.remoteCatalog.songs = [];
@@ -4803,6 +5030,10 @@ function bindEvents() {
   });
   el.remoteConvertBtn.addEventListener("click", () => prepareRemoteSelection(false));
   el.remoteImportBtn.addEventListener("click", () => prepareRemoteSelection(true));
+  el.remoteKaraTab.addEventListener("click", () => switchRemoteSource("kara"));
+  el.remoteMutopiaTab.addEventListener("click", () => switchRemoteSource("mutopia"));
+  el.remoteMidiCollectionTab.addEventListener("click", () => switchRemoteSource("midiCollection"));
+  el.remoteMoreBtn.addEventListener("click", () => loadPagedRemoteResults(state.remoteCatalog.mutopiaPage + 1, state.remoteCatalog.mutopiaQuery, state.remoteCatalog.source));
 
   el.midiFileInput.addEventListener("change", () => {
     const files = [...(el.midiFileInput.files || [])];
@@ -4899,6 +5130,7 @@ function bindEvents() {
   el.questStatusBtn.addEventListener("click", checkQuestStatus);
   el.questPullBtn.addEventListener("click", importJsonFromQuest);
   el.questPushBtn.addEventListener("click", pushJsonToQuest);
+  el.questCompareBtn.addEventListener("click", compareQuestCollections);
   el.themeLightBtn.addEventListener("click", () => applyTheme("light"));
   el.themeDarkBtn.addEventListener("click", () => applyTheme("dark"));
 
@@ -4999,22 +5231,58 @@ async function bootstrap() {
   if (window.pianovisualDesktop?.questStatus) void checkQuestStatus();
 }
 
-function chooseQuestFiles(files, summary) {
+function chooseQuestVersionMode() {
+  return new Promise((resolve) => {
+    const dialog = document.createElement("dialog");
+    dialog.className = "quest-file-dialog";
+    dialog.setAttribute("aria-labelledby", "questVersionModeTitle");
+    dialog.innerHTML = `<h2 id="questVersionModeTitle">Titoli sul Quest</h2><p>Le copie con versione avranno titoli come Brano [Piano]. I brani gia presenti non vengono rimossi.</p><div class="quest-file-actions"><button class="btn subtle" type="button" data-mode="cancel">Annulla</button><button class="btn subtle" type="button" data-mode="original">Titoli originali</button><button class="btn" type="button" data-mode="labeled">Aggiungi versione</button></div>`;
+    document.body.appendChild(dialog);
+    const close = (value) => { dialog.close(); dialog.remove(); resolve(value); };
+    dialog.addEventListener("cancel", (event) => { event.preventDefault(); close(null); });
+    dialog.querySelector('[data-mode="cancel"]').onclick = () => close(null);
+    dialog.querySelector('[data-mode="original"]').onclick = () => close(false);
+    dialog.querySelector('[data-mode="labeled"]').onclick = () => close(true);
+    dialog.showModal();
+  });
+}
+
+function chooseQuestFiles(files) {
   return new Promise((resolve) => {
     const dialog = document.createElement("dialog");
     dialog.className = "quest-file-dialog";
     const categories = { json: "Brani JSON", jsonpiano: "Riduzioni pianistiche", jsonselected: "Strumenti selezionati" };
     const statuses = { new: "Nuovo", changed: "Da sovrascrivere", same: "Uguale" };
-    dialog.innerHTML = `<h2>Invia JSON al Quest</h2><p>Nuovi: ${summary.new || 0} · Modificati: ${summary.changed || 0} · Uguali: ${summary.same || 0}</p><div class="quest-file-list">${files.map((item, index) => `<label><input type="checkbox" value="${index}"><span>${escapeHtml(item.fileName)}<small>${escapeHtml(categories[item.directoryName] || item.directoryName)} · ${escapeHtml(statuses[item.status] || item.status)}</small></span></label>`).join("")}</div><p class="quest-selection-error" role="alert"></p><div class="quest-file-actions"><button type="button" data-action="new">Seleziona nuovi</button><button type="button" data-action="cancel">Annulla</button><button type="button" data-action="send">Invia selezionati</button></div>`;
+    dialog.setAttribute("aria-labelledby", "questFileTitle");
+    dialog.innerHTML = `<h2 id="questFileTitle">Invia JSON al Quest</h2><label class="quest-category-label">Categoria <select id="questFileCategory"><option value="">Seleziona categoria</option>${["jsonpiano", "jsonselected", "json"].map((key) => `<option value="${key}">${categories[key]} (${files.filter((item) => item.directoryName === key).length})</option>`).join("")}</select></label><p class="quest-category-summary" aria-live="polite"></p><div class="quest-file-list"></div><p class="quest-selection-count" aria-live="polite">0 selezionati</p><p class="quest-selection-error" role="alert"></p><div class="quest-file-actions"><button class="btn subtle" type="button" data-action="new" disabled>Seleziona nuovi e modificati</button><button class="btn subtle" type="button" data-action="clear" disabled>Deseleziona</button><button class="btn subtle" type="button" data-action="cancel">Annulla</button><button class="btn" type="button" data-action="send" disabled>Invia selezionati</button></div>`;
     document.body.appendChild(dialog);
     const close = (selection) => { dialog.close(); dialog.remove(); resolve(selection); };
+    const category = dialog.querySelector("#questFileCategory");
+    const list = dialog.querySelector(".quest-file-list");
+    const count = dialog.querySelector(".quest-selection-count");
+    const error = dialog.querySelector(".quest-selection-error");
+    const updateCount = () => {
+      const selected = list.querySelectorAll("input:checked").length;
+      count.textContent = `${selected} selezionati`;
+      dialog.querySelector('[data-action="send"]').disabled = selected === 0;
+    };
+    category.addEventListener("change", () => {
+      const matches = files.map((item, index) => ({ item, index })).filter(({ item }) => item.directoryName === category.value);
+      list.innerHTML = matches.length ? matches.map(({ item, index }) => `<label><input type="checkbox" value="${index}"><span>${escapeHtml(item.displayName || item.fileName)}<small>${escapeHtml(statuses[item.status] || item.status)}</small></span></label>`).join("") : category.value ? '<p class="quest-empty">Nessun JSON in questa categoria.</p>' : "";
+      dialog.querySelector(".quest-category-summary").textContent = category.value ? `Nuovi: ${matches.filter(({ item }) => item.status === "new").length} · Modificati: ${matches.filter(({ item }) => item.status === "changed").length} · Uguali: ${matches.filter(({ item }) => item.status === "same").length}` : "";
+      dialog.querySelector('[data-action="new"]').disabled = !matches.some(({ item }) => item.status !== "same");
+      dialog.querySelector('[data-action="clear"]').disabled = matches.length === 0;
+      error.textContent = "";
+      updateCount();
+    });
+    list.addEventListener("change", updateCount);
     dialog.addEventListener("cancel", (event) => { event.preventDefault(); close([]); });
     dialog.querySelector('[data-action="cancel"]').onclick = () => close([]);
-    dialog.querySelector('[data-action="new"]').onclick = () => dialog.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = files[Number(input.value)].status === "new"; });
+    dialog.querySelector('[data-action="new"]').onclick = () => { list.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = files[Number(input.value)].status !== "same"; }); updateCount(); };
+    dialog.querySelector('[data-action="clear"]').onclick = () => { list.querySelectorAll('input[type="checkbox"]').forEach((input) => { input.checked = false; }); updateCount(); };
     dialog.querySelector('[data-action="send"]').onclick = () => {
-      const selection = [...dialog.querySelectorAll('input:checked')].map((input) => files[Number(input.value)]);
+      const selection = [...list.querySelectorAll('input:checked')].map((input) => files[Number(input.value)]);
       const names = selection.map((item) => item.fileName.toLowerCase());
-      const error = dialog.querySelector(".quest-selection-error");
       if (!selection.length) { error.textContent = "Seleziona almeno un file."; return; }
       if (new Set(names).size !== names.length) { error.textContent = "Seleziona una sola versione per ogni nome di file."; return; }
       close(selection);

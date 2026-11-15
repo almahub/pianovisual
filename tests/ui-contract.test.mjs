@@ -51,7 +51,8 @@ test("ui critical controls exist for key workflows", async () => {
 
 test("secondary UI controls are grouped into collapsible sections", async () => {
   const html = await fs.readFile(indexPath, "utf8");
-  assert.equal((html.match(/class="sidebar-block sidebar-group"/g) || []).length, 4);
+  assert.equal((html.match(/class="sidebar-block sidebar-group"/g) || []).length, 3);
+  assert.equal(html.includes("Focus Studio"), false);
   assert.equal(html.includes('class="toolbar-menu"'), true);
   assert.equal(html.includes('class="detail-more-actions"'), true);
 });
@@ -63,6 +64,16 @@ test("desktop bridge exposes safe export, folder import and Quest sync actions",
   }
 });
 
+test("Quest transfer requires an explicit category and forwards the preview device", async () => {
+  const app = await fs.readFile(path.join(root, "app.js"), "utf8");
+  const preload = await fs.readFile(path.join(root, "electron", "preload.cjs"), "utf8");
+  assert.ok(app.includes('id="questFileCategory"'));
+  assert.ok(app.includes('"jsonpiano", "jsonselected", "json"'));
+  assert.ok(app.includes('item.directoryName === category.value'));
+  assert.ok(app.includes('preview.serial'));
+  assert.ok(preload.includes('ipcRenderer.invoke("quest:push-json", files, serial, labeled)'));
+});
+
 test("dashboard offers separate navigation and counts for available library types", async () => {
   const app = await fs.readFile(path.join(root, "app.js"), "utf8");
   const dashboard = app.slice(app.indexOf("function renderDirectoryPanel()"), app.indexOf("function renderViewLabels()"));
@@ -71,6 +82,15 @@ test("dashboard offers separate navigation and counts for available library type
   assert.match(dashboard, /data-nav-target="library"/);
   assert.match(dashboard, /data-nav-target="reductions"/);
   assert.match(dashboard, /data-nav-target="selectedVersions"/);
+});
+
+test("artist and genre directories and their song lists use available MIDI", async () => {
+  const app = await fs.readFile(path.join(root, "app.js"), "utf8");
+  const filtered = app.slice(app.indexOf("function filteredSongs()"), app.indexOf("function renderDirectoryPanel()"));
+  const directory = app.slice(app.indexOf('  if (state.view === "genres") {', app.indexOf("function renderDirectoryPanel()")), app.indexOf("function renderViewLabels()"));
+  assert.match(filtered, /\["artists", "genres"\]\.includes\(state\.view\)\) list = list\.filter\(\(song\) => song\.midiAvailable\)/);
+  assert.match(directory, /const midiSongs = songs\.filter\(\(song\) => song\.midiAvailable\)/);
+  assert.match(directory, /for \(const s of songs\.filter\(\(song\) => song\.midiAvailable\)\)/);
 });
 
 test("playlist actions and detail layout remain available", async () => {

@@ -8,6 +8,9 @@ const { promisify } = require("node:util");
 const { pathToFileURL } = require("node:url");
 const { parseAdbDevices, findWindowsMtpQuest } = require("./quest-connection.cjs");
 const { createBackupArchive, restoreBackupArchive } = require("./backup.cjs");
+const { readQuestCollections, compareQuestCollections } = require("./quest-comparison.cjs");
+const { buildQuestPlaylistDatabase } = require("./quest-playlist-export.cjs");
+const { versionCopy } = require("./quest-version-copy.cjs");
 
 const execFileAsync = promisify(execFile);
 const QUEST_JSON_DIR = "/sdcard/Android/data/com.ZarApps.PianoVision/files";
@@ -115,6 +118,26 @@ async function getQuestDevice() {
   const status = parseAdbDevices((await runAdb(["devices"])).stdout);
   if (status.code !== "ready") throw new Error(status.message);
   return status.serial;
+}
+
+async function localQuestTransferFiles(labeled) {
+  const files = await localLibraryJsonFiles();
+  if (!labeled) return files;
+  const databases = await Promise.all(['db.json', 'dbpiano.json'].map(async (name) => JSON.parse(await fs.readFile(path.join(runtimeLibraryDir(), name), 'utf8'))));
+  const byPath = new Map();
+  for (const song of databases.flatMap((db) => db.songs || [])) {
+    if (!song.jsonPath?.startsWith('/library/')) continue;
+    const key = song.jsonPath.slice(9);
+    if (byPath.has(key) && byPath.get(key).id !== song.id) throw new Error('Piu brani condividono lo stesso JSON: impossibile etichettare in sicurezza.');
+    byPath.set(key, song);
+  }
+  for (const [id, file] of files) {
+    const song = byPath.get(id);
+    if (!song?.versionName || !['selected_instruments', 'piano_reduction'].includes(song.variantType)) continue;
+    const copy = versionCopy(await fs.readFile(file.localPath), song);
+    files.set(id, { ...file, fileName: copy.fileName, content: copy.content, hash: copy.hash, displayName: copy.title });
+  }
+  return files;
 }
 
 async function remoteQuestFiles(serial) {
@@ -349,15 +372,196 @@ ipcMain.handle("quest:pull-json", async () => {
   }
 });
 
-ipcMain.handle("quest:preview-push", async () => {
-  const serial = await getQuestDevice();
+async function readQuestSnapshots(serial) {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pianovisual-quest-compare-"));
+  try {
+    const names = ["pvuser_testing4.bytes", "pvstatic.bytes"];
+    const snapshots = [];
+    for (const name of names) {
+      const remote = `${QUEST_JSON_DIR}/${name}`;
+      const check = `if [ -s '${remote}-wal' ] || [ -s '${remote}-journal' ]; then echo JOURNAL_ACTIVE; else stat -c '%s:%Y' '${remote}'; fi`;
+      const before = (await runAdb(["-s", serial, "shell", check])).stdout.trim();
+      if (!/^\d+:\d+$/.test(before)) throw new Error(`Database ${name} non disponibile o con journal attivo; chiudi PianoVision e riprova.`);
+      const local = path.join(tempDir, name);
+      await runAdb(["-s", serial, "pull", remote, local]);
+      const after = (await runAdb(["-s", serial, "shell", check])).stdout.trim();
+      if (before !== after || Number(before.split(":")[0]) !== (await fs.stat(local)).size) throw new Error(`Database ${name} modificato durante la lettura; chiudi PianoVision e riprova.`);
+      snapshots.push(await fs.readFile(local));
+    }
+    return snapshots;
+  } finally {
+    await Promise.all(["pvuser_testing4.bytes", "pvstatic.bytes"].map((name) => fs.rm(path.join(tempDir, name), { force: true })));
+    await fs.rmdir(tempDir);
+  }
+}
+
+async function getQuestComparison() {
+    const serial = await getQuestDevice();
+    const remote = await readQuestCollections(...await readQuestSnapshots(serial));
+    const readLocalDb = async (name) => JSON.parse(await fs.readFile(path.join(runtimeLibraryDir(), name), "utf8"));
+    const main = await readLocalDb("db.json"), piano = await readLocalDb("dbpiano.json");
+    const uniqueById = (items) => [...new Map(items.map((item) => [item.id, item])).values()];
+    const localDb = { songs: uniqueById([...(main.songs || []), ...(piano.songs || [])]), collections: uniqueById([...(main.collections || []), ...(piano.collections || [])]), songCollection: [...(main.songCollection || []), ...(piano.songCollection || [])] };
+    const remoteHashes = new Map((await remoteQuestFiles(serial)).map((file) => [file.fileName, file.hash]));
+    const relevantHashes = new Set([...remote.favorites, ...remote.playlists.flatMap((list) => list.songs)].filter((piece) => piece.origin === "imported").map((piece) => remoteHashes.get(piece.fileName)).filter(Boolean));
+    const localHashes = new Map();
+    for (const [relative, file] of await localLibraryJsonFiles()) {
+      if (!localDb.songs.some((song) => song.jsonPath === `/library/${relative}`)) continue;
+      const hash = await sha256File(file.localPath);
+      if (relevantHashes.has(hash)) localHashes.set(`/library/${relative}`, hash);
+    }
+    const versionHashes = new Map();
+    for (const [relative, file] of await localQuestTransferFiles(true)) {
+      if (!file.hash || !relevantHashes.has(file.hash)) continue;
+      for (const song of localDb.songs.filter((item) => item.jsonPath === `/library/${relative}`)) versionHashes.set(song.id, file.hash);
+    }
+    const comparison = compareQuestCollections(remote, localDb.songs, remoteHashes, localHashes, localDb, versionHashes);
+    const snapshot = crypto.createHash("sha256").update(JSON.stringify({ serial, profiles: comparison.profiles, favorites: comparison.favorites })).digest("hex");
+    const playlistSnapshot = crypto.createHash("sha256").update(JSON.stringify({ serial, profiles: comparison.profiles, playlists: comparison.playlists })).digest("hex");
+    return { serial, ...comparison, snapshot, playlistSnapshot, syncBindings: (main.questFavoriteSync?.bindings || []).filter((entry) => entry.device === serial), playlistBindings: (main.questPlaylistSync?.playlists || []).filter((entry) => entry.device === serial), localManualPlaylists: localDb.collections.filter((entry) => entry.type === "playlist" && !entry.smartRule).map((entry) => ({ id: entry.id, name: entry.name })) };
+}
+
+ipcMain.handle("quest:compare-collections", getQuestComparison);
+
+ipcMain.handle("quest:apply-favorite-sync", async (_, request) => {
+  if (!request || typeof request.snapshot !== "string" || typeof request.revision !== "string" || !Number.isSafeInteger(request.profileId) || !Array.isArray(request.choices)) throw new Error("Richiesta di sincronizzazione non valida.");
+  const current = await getQuestComparison();
+  if (request.snapshot !== current.snapshot || request.serial !== current.serial) throw new Error("Il Quest o i preferiti sono cambiati: ripeti il confronto.");
+  if (!current.profiles.some((profile) => profile.id === request.profileId)) throw new Error("Profilo Quest non disponibile.");
+  const favorites = current.favorites.filter((song) => song.profileId === request.profileId);
+  for (const choice of request.choices) {
+    const piece = favorites.find((song) => song.pieceId === choice.pieceId);
+    if (!piece || !piece.candidates.some((candidate) => candidate.id === choice.songId)) throw new Error("Una corrispondenza non e piu disponibile: ripeti il confronto.");
+  }
+  const response = await fetch(`http://${HOST}:${serverPort}/api/quest/favorites-apply`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ device: current.serial, profileId: request.profileId, remoteIds: favorites.map((song) => song.pieceId), choices: request.choices, revision: request.revision }),
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || "Sincronizzazione non riuscita.");
+  return result;
+});
+
+ipcMain.handle("quest:apply-playlist-sync", async (_, request) => {
+  if (!request || typeof request.snapshot !== "string" || typeof request.revision !== "string" || !Number.isSafeInteger(request.profileId) || !Number.isSafeInteger(request.playlistId) || typeof request.localId !== "string" || !Array.isArray(request.choices)) throw new Error("Richiesta playlist non valida.");
+  const current = await getQuestComparison();
+  if (request.snapshot !== current.playlistSnapshot || request.serial !== current.serial) throw new Error("Il Quest o le playlist sono cambiati: ripeti il confronto.");
+  const playlist = current.playlists.find((item) => item.profileId === request.profileId && item.id === request.playlistId);
+  if (!playlist) throw new Error("Playlist Quest non disponibile: ripeti il confronto.");
+  for (const choice of request.choices) {
+    const piece = playlist.songs.find((song) => song.pieceId === choice.pieceId);
+    if (!piece || !piece.candidates.some((candidate) => candidate.id === choice.songId)) throw new Error("Una corrispondenza non e piu disponibile: ripeti il confronto.");
+  }
+  const response = await fetch(`http://${HOST}:${serverPort}/api/quest/playlist-apply`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ device: current.serial, profileId: playlist.profileId, playlistId: playlist.id, playlistName: playlist.name, localId: request.localId, remoteIds: playlist.songs.map((song) => song.pieceId), choices: request.choices, revision: request.revision }),
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || "Sincronizzazione playlist non riuscita.");
+  return result;
+});
+
+const outgoingPlaylistPreviews = new Map();
+
+async function requirePianoVisionClosed(serial) {
+  const { stdout } = await runAdb(["-s", serial, "shell", "if pidof com.ZarApps.PianoVision >/dev/null; then echo RUNNING; else echo STOPPED; fi"]);
+  if (stdout.trim() !== "STOPPED") throw new Error("Chiudi completamente PianoVision sul Quest prima di procedere.");
+}
+
+async function prepareOutgoingPlaylist(serial, localId, profileId) {
+  await requirePianoVisionClosed(serial);
+  const [userBytes, staticBytes] = await readQuestSnapshots(serial);
+  const remote = await readQuestCollections(userBytes, staticBytes);
+  if (!remote.profiles.some((profile) => profile.id === profileId)) throw new Error("Profilo Quest non disponibile.");
+  const main = JSON.parse(await fs.readFile(path.join(runtimeLibraryDir(), "db.json"), "utf8"));
+  const piano = JSON.parse(await fs.readFile(path.join(runtimeLibraryDir(), "dbpiano.json"), "utf8"));
+  const localDb = { songs: [...(main.songs || []), ...(piano.songs || [])], collections: [...(main.collections || []), ...(piano.collections || [])], relations: [...(main.songCollection || []), ...(piano.songCollection || [])] };
+  const playlist = localDb.collections.find((item) => item.id === localId && item.type === "playlist" && !item.smartRule);
+  if (!playlist) throw new Error("Playlist locale non disponibile.");
+  const ids = new Set(localDb.relations.filter((item) => item.collectionId === localId).map((item) => item.songId));
+  const remoteFiles = new Map((await remoteQuestFiles(serial)).map((file) => [file.fileName, file.hash]));
   const localFiles = await localLibraryJsonFiles();
+  const labeledFiles = await localQuestTransferFiles(true);
+  const songs = [];
+  for (const song of localDb.songs.filter((item) => ids.has(item.id))) {
+    const local = typeof song.jsonPath === "string" && song.jsonPath.startsWith("/library/") ? localFiles.get(song.jsonPath.slice(9)) : null;
+    let localHash = "";
+    if (local) localHash = await sha256File(local.localPath);
+    const labeledHash = typeof song.jsonPath === 'string' ? labeledFiles.get(song.jsonPath.slice(9))?.hash : '';
+    const candidates = remote.importedPieces.filter((piece) => localHash && (remoteFiles.get(piece.fileName) === localHash || (labeledHash && remoteFiles.get(piece.fileName) === labeledHash))).map((piece) => ({ pieceId: piece.pieceId, title: piece.title, artist: piece.artist }));
+    songs.push({ id: song.id, title: song.title || "", artist: song.artist || "", localHash, candidates });
+  }
+  const profilePlaylists = remote.playlists.filter((item) => item.profileId === profileId).map((item) => ({ id: item.id, name: item.name, pieceIds: item.songs.map((song) => song.pieceId) }));
+  const data = { serial, profileId, localId, playlistName: String(playlist.name || ""), songs, profilePlaylists, userHash: crypto.createHash("sha256").update(userBytes).digest("hex") };
+  const signature = crypto.createHash("sha256").update(JSON.stringify(data)).digest("hex");
+  return { data, signature, userBytes };
+}
+
+ipcMain.handle("quest:preview-outgoing-playlist", async (_, request) => {
+  if (!request || typeof request.localId !== "string" || !Number.isSafeInteger(request.profileId)) throw new Error("Selezione playlist non valida.");
+  const serial = await getQuestDevice();
+  const prepared = await prepareOutgoingPlaylist(serial, request.localId, request.profileId);
+  const token = crypto.randomBytes(24).toString("hex");
+  outgoingPlaylistPreviews.clear();
+  outgoingPlaylistPreviews.set(token, { ...prepared.data, signature: prepared.signature, createdAt: Date.now() });
+  return { token, ...prepared.data };
+});
+
+ipcMain.handle("quest:send-outgoing-playlist", async (_, request) => {
+  const preview = outgoingPlaylistPreviews.get(request?.token);
+  outgoingPlaylistPreviews.delete(request?.token);
+  if (!preview || Date.now() - preview.createdAt > 10 * 60 * 1000 || !Array.isArray(request.choices) || !Number.isSafeInteger(request.destinationId) || request.destinationId < 0) throw new Error("Anteprima scaduta o selezione non valida.");
+  const serial = await getQuestDevice();
+  if (serial !== preview.serial) throw new Error("Il Quest e cambiato: ripeti l'anteprima.");
+  const current = await prepareOutgoingPlaylist(serial, preview.localId, preview.profileId);
+  if (current.signature !== preview.signature) throw new Error("Playlist, database o file sono cambiati: ripeti l'anteprima.");
+  const seenSongs = new Set(), seenPieces = new Set();
+  for (const choice of request.choices) {
+    const song = current.data.songs.find((entry) => entry.id === choice.songId);
+    if (!song || seenSongs.has(choice.songId) || seenPieces.has(choice.pieceId) || !song.candidates.some((piece) => piece.pieceId === choice.pieceId)) throw new Error("Collegamento brano non valido: ripeti l'anteprima.");
+    seenSongs.add(choice.songId); seenPieces.add(choice.pieceId);
+  }
+  if (request.destinationId && !current.data.profilePlaylists.some((entry) => entry.id === request.destinationId)) throw new Error("Playlist Quest di destinazione non valida.");
+  const built = await buildQuestPlaylistDatabase(current.userBytes, { profileId: preview.profileId, destinationId: request.destinationId, playlistName: preview.playlistName, pieceIds: request.choices.map((entry) => entry.pieceId) });
+  const backupDir = path.join(app.getPath("userData"), "backups", "quest-playlist");
+  await fs.mkdir(backupDir, { recursive: true });
+  const backupPath = path.join(backupDir, `pvuser-${Date.now()}-${crypto.randomBytes(5).toString("hex")}.bytes`);
+  await fs.writeFile(backupPath, current.userBytes, { flag: "wx" });
+  if (await sha256File(backupPath) !== preview.userHash) throw new Error(`Backup non verificato: ${backupPath}`);
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "pianovisual-quest-send-"));
+  const localStage = path.join(tempDir, "playlist.bytes");
+  const remoteStage = `${QUEST_JSON_DIR}/.pianovisual-playlist-${crypto.randomBytes(12).toString("hex")}.tmp`;
+  const dbFile = `${QUEST_JSON_DIR}/pvuser_testing4.bytes`;
+  const stageHash = crypto.createHash("sha256").update(built.bytes).digest("hex");
+  let writeStarted = false;
+  try {
+    await fs.writeFile(localStage, built.bytes, { flag: "wx" });
+    await runAdb(["-s", serial, "push", localStage, remoteStage]);
+    await requirePianoVisionClosed(serial);
+    const shell = `if pidof com.ZarApps.PianoVision >/dev/null; then echo GAME_RUNNING; exit 11; fi; if [ -s '${dbFile}-wal' ] || [ -s '${dbFile}-journal' ]; then echo JOURNAL_ACTIVE; exit 12; fi; if ! sha256sum '${dbFile}' | grep -q '^${preview.userHash} '; then echo DATABASE_CHANGED; exit 13; fi; if ! sha256sum '${remoteStage}' | grep -q '^${stageHash} '; then echo STAGE_CHANGED; exit 14; fi; dd if='${remoteStage}' of='${dbFile}' conv=notrunc`;
+    writeStarted = true;
+    await runAdb(["-s", serial, "shell", shell]);
+    const verify = (await runAdb(["-s", serial, "shell", "sha256sum", dbFile])).stdout.trim().split(/\s+/)[0];
+    if (verify !== stageHash) throw new Error("Verifica del database sul Quest fallita");
+    return { created: built.created, added: built.added, backupPath, skipped: preview.songs.length - request.choices.length };
+  } catch (error) {
+    throw new Error(`${error.message}${writeStarted ? ` Il database potrebbe essere incompleto: non avviare PianoVision; backup sul PC: ${backupPath}` : ` Backup sul PC: ${backupPath}`}`);
+  } finally {
+    try { await runAdb(["-s", serial, "shell", "rm", "-f", remoteStage]); } catch { /* The Quest may have disconnected. */ }
+    await fs.rm(localStage, { force: true });
+    await fs.rmdir(tempDir);
+  }
+});
+
+ipcMain.handle("quest:preview-push", async (_, labeled = false) => {
+  const serial = await getQuestDevice();
+  const localFiles = await localQuestTransferFiles(labeled === true);
   const remoteMap = new Map((await remoteQuestFiles(serial)).map((item) => [item.fileName, item.hash]));
   const files = [];
-  for (const [id, { fileName, directoryName, localPath }] of localFiles) {
-    const hash = await sha256File(localPath);
+  for (const [id, { fileName, directoryName, localPath, hash: copyHash, displayName }] of localFiles) {
+    const hash = copyHash || await sha256File(localPath);
     const remoteHash = remoteMap.get(fileName) || "";
-    files.push({ id, fileName, directoryName, localHash: hash, remoteHash, status: !remoteHash ? "new" : remoteHash === hash ? "same" : "changed" });
+    files.push({ id, fileName, displayName: displayName || fileName, directoryName, localHash: hash, remoteHash, status: !remoteHash ? "new" : remoteHash === hash ? "same" : "changed" });
   }
   return {
     serial,
@@ -371,11 +575,12 @@ ipcMain.handle("quest:preview-push", async () => {
   };
 });
 
-ipcMain.handle("quest:push-json", async (_, requestedFiles) => {
+ipcMain.handle("quest:push-json", async (_, requestedFiles, expectedSerial, labeled = false) => {
   const serial = await getQuestDevice();
+  if (typeof expectedSerial !== "string" || !expectedSerial || serial !== expectedSerial) throw new Error("Il Quest e cambiato dopo l'anteprima. Ripeti il confronto.");
   const selection = Array.isArray(requestedFiles) ? requestedFiles : [];
   if (selection.length === 0 || selection.length > 5000) throw new Error("Selezione file non valida");
-  const localFiles = await localLibraryJsonFiles();
+  const localFiles = await localQuestTransferFiles(labeled === true);
   const remoteBefore = new Map((await remoteQuestFiles(serial)).map((item) => [item.fileName, item.hash]));
   const seenNames = new Set();
   for (const item of selection) {
@@ -383,15 +588,19 @@ ipcMain.handle("quest:push-json", async (_, requestedFiles) => {
     if (!local || !/^[a-f0-9]{64}$/.test(item.localHash || "") || !/^(?:[a-f0-9]{64})?$/.test(item.remoteHash || "")) throw new Error("Selezione file non valida: ripeti l'anteprima.");
     if (seenNames.has(local.fileName.toLowerCase())) throw new Error(`Seleziona una sola versione di ${local.fileName}.`);
     seenNames.add(local.fileName.toLowerCase());
-    if (await sha256File(local.localPath) !== item.localHash || (remoteBefore.get(local.fileName) || "") !== item.remoteHash) throw new Error(`Il file ${local.fileName} e cambiato dopo l'anteprima. Ripeti il confronto.`);
+    if ((local.hash || await sha256File(local.localPath)) !== item.localHash || (remoteBefore.get(local.fileName) || "") !== item.remoteHash) throw new Error(`Il file ${local.fileName} e cambiato dopo l'anteprima. Ripeti il confronto.`);
   }
   await runAdb(["-s", serial, "shell", "mkdir", "-p", QUEST_JSON_DIR]);
   const errors = [];
   const pushed = [];
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pianovisual-quest-versions-'));
+  try {
   for (const item of selection) {
-    const { fileName, localPath } = localFiles.get(item.id);
+    const { fileName, localPath, content } = localFiles.get(item.id);
     try {
-      await runAdb(["-s", serial, "push", localPath, `${QUEST_JSON_DIR}/${fileName}`]);
+      const source = content ? path.join(tempDir, fileName) : localPath;
+      if (content) await fs.writeFile(source, content, { flag: 'wx' });
+      await runAdb(["-s", serial, "push", source, `${QUEST_JSON_DIR}/${fileName}`]);
       pushed.push({ fileName, hash: item.localHash });
     } catch (error) {
       errors.push({ fileName, error: error.message });
@@ -406,6 +615,9 @@ ipcMain.handle("quest:push-json", async (_, requestedFiles) => {
     else errors.push({ fileName: item.fileName, error: "Hash sul Quest diverso o non disponibile dopo la copia" });
   }
   return { serial, remotePath: QUEST_JSON_DIR, copied, errors };
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
 });
 
 function setupAutoUpdater() {

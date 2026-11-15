@@ -4,9 +4,29 @@ import { createRequire } from "node:module";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { createWriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
 
 const require = createRequire(import.meta.url);
 const { createBackupArchive, restoreBackupArchive } = require("../electron/backup.cjs");
+const yazl = require("yazl");
+const yauzl = require("yauzl-promise");
+
+async function createTestArchive(target, withWrongHash) {
+  const files = {
+    "db.json": JSON.stringify({ songs: [], collections: [] }),
+    "dbpiano.json": JSON.stringify({ songs: [], collections: [] }),
+    "midi/original.mid": "modified",
+  };
+  const manifest = { format: "pianovisual-complete-backup", formatVersion: 1, appVersion: "old", settings: {},
+    files: Object.entries(files).map(([name, content]) => ({ path: name, bytes: Buffer.byteLength(content),
+      ...(withWrongHash ? { sha256: "0".repeat(64) } : {}) })) };
+  const zip = new yazl.ZipFile();
+  zip.addBuffer(Buffer.from(JSON.stringify(manifest)), "manifest.json");
+  for (const [name, content] of Object.entries(files)) zip.addBuffer(Buffer.from(content), `library/${name}`);
+  zip.end();
+  await pipeline(zip.outputStream, createWriteStream(target));
+}
 
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "pianovisual-backup-test-"));
@@ -33,6 +53,17 @@ test("complete backup restores files, metadata, settings and keeps the previous 
     const created = await createBackupArchive({ libraryDir, targetPath: archivePath,
       settings: { theme: "light", visualizerColors: '{"song-1":{"Piano":"#ff0000"}}' }, appVersion: "1.0.32" });
     assert.equal(created.fileCount, 7);
+    const archive = await yauzl.open(archivePath);
+    let manifest;
+    for await (const entry of archive) {
+      if (entry.filename !== "manifest.json") continue;
+      const chunks = [];
+      for await (const chunk of await entry.openReadStream()) chunks.push(chunk);
+      manifest = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    }
+    await archive.close();
+    assert.equal(manifest.files.length, 7);
+    assert.ok(manifest.files.every((file) => /^[a-f0-9]{64}$/.test(file.sha256)));
     await fs.writeFile(path.join(libraryDir, "db.json"), JSON.stringify({ songs: [], collections: [] }));
     await fs.writeFile(path.join(libraryDir, "json", "new.json"), "keep previous");
     const result = await restoreBackupArchive({ archivePath, libraryDir });
@@ -71,4 +102,23 @@ test("backup refuses a destination inside the library or an existing archive", a
   } finally {
     await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
+});
+
+test("restore rejects altered content even when its size matches the manifest", async () => {
+  const { root, libraryDir, archivePath } = await fixture();
+  try {
+    await createTestArchive(archivePath, true);
+    await assert.rejects(restoreBackupArchive({ archivePath, libraryDir }), /Integrita/);
+    assert.equal(JSON.parse(await fs.readFile(path.join(libraryDir, "db.json"))).songs[0].artist, "Ivan Graziani");
+  } finally { await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
+});
+
+test("restore accepts backups created before file hashes were added", async () => {
+  const { root, libraryDir, archivePath } = await fixture();
+  try {
+    await createTestArchive(archivePath, false);
+    const result = await restoreBackupArchive({ archivePath, libraryDir });
+    assert.equal(result.appVersion, "old");
+    assert.equal(await fs.readFile(path.join(libraryDir, "midi", "original.mid"), "utf8"), "modified");
+  } finally { await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); }
 });

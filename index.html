@@ -49,16 +49,6 @@
           <button class="nav-item piano-nav-item" data-view="selectedVersions">♪ Strumenti selezionati</button>
         </nav>
 
-        <details class="sidebar-block sidebar-group" open>
-          <summary><span aria-hidden="true">◎</span> Focus Studio</summary>
-          <div class="sidebar-group-content study-tags">
-            <button class="chip" data-study-filter="recent">Recenti</button>
-            <button class="chip" data-study-filter="to_study">Da studiare</button>
-            <button class="chip" data-study-filter="in_progress">In progress</button>
-            <button class="chip" data-study-filter="mastered">Mastered</button>
-          </div>
-        </details>
-
         <details class="sidebar-block sidebar-group">
           <summary><span aria-hidden="true">▣</span> File e backup</summary>
           <div class="sidebar-group-content sidebar-action-list">
@@ -81,6 +71,7 @@
             <button id="questStatusBtn" class="chip">Rileva Quest 3</button>
             <button id="questPullBtn" class="chip" disabled>Importa JSON dal Quest</button>
             <button id="questPushBtn" class="chip" disabled>Invia JSON al Quest</button>
+            <button id="questCompareBtn" class="chip" disabled>Confronta preferiti e playlist</button>
             <p id="questStatusText" class="mini-note">Richiede ADB e debug USB.</p>
           </div>
         </details>
@@ -374,13 +365,19 @@
                     <h3>Catalogo remoto</h3>
                     <p class="panel-subtitle">Sfoglia artisti e brani senza scaricare MIDI. Il file viene letto solo quando converti o importi.</p>
                   </div>
-                  <a class="btn subtle" href="https://ftp.karapertutti.altervista.org/browser.php" target="_blank" rel="noopener noreferrer">Apri sito sorgente</a>
+                  <a id="remoteSourceLink" class="btn subtle" href="https://ftp.karapertutti.altervista.org/browser.php" target="_blank" rel="noopener noreferrer">Apri sito sorgente</a>
+                </div>
+                <div class="remote-toolbar" role="tablist" aria-label="Fonte catalogo">
+                  <button id="remoteKaraTab" class="btn" type="button" role="tab" aria-selected="true">Kara per Tutti</button>
+                  <button id="remoteMutopiaTab" class="btn subtle" type="button" role="tab" aria-selected="false">Mutopia</button>
+                  <button id="remoteMidiCollectionTab" class="btn subtle" type="button" role="tab" aria-selected="false">MIDI Collection</button>
                 </div>
                 <div class="remote-toolbar">
                   <input id="remoteCatalogSearch" type="search" placeholder="Cerca artista o titolo..." />
                   <button id="remoteCatalogSearchBtn" class="btn" type="button">Cerca</button>
                   <button id="remoteCatalogClearBtn" class="btn subtle" type="button">Azzera</button>
                   <button id="remoteCatalogBackBtn" class="btn subtle hidden" type="button">← Tutti gli artisti</button>
+                  <button id="remoteMoreBtn" class="btn subtle hidden" type="button">Altri risultati</button>
                 </div>
                 <p id="remoteCatalogStatus" class="status">Apri il catalogo per caricare gli artisti.</p>
                 <div id="remoteArtistsWrap" class="remote-artists-grid"></div>

@@ -9,7 +9,31 @@ const yauzl = require("yauzl-promise");
 
 const MAX_FILES = 20000;
 const MAX_BYTES = 20 * 1024 * 1024 * 1024;
-const MAX_MANIFEST_BYTES = 2 * 1024 * 1024;
+const MAX_MANIFEST_BYTES = 16 * 1024 * 1024;
+
+async function sha256File(filePath) {
+  const digest = crypto.createHash("sha256");
+  for await (const chunk of fs.createReadStream(filePath)) digest.update(chunk);
+  return digest.digest("hex");
+}
+
+async function verifyCreatedArchive(archivePath, files) {
+  const expected = new Map(files.map((file) => [`library/${file.path}`, file]));
+  const zip = await yauzl.open(archivePath, { strictFilenames: true });
+  try {
+    for await (const entry of zip) {
+      if (entry.filename === "manifest.json") continue;
+      const file = expected.get(entry.filename);
+      if (!file) throw new Error("File inatteso nel backup creato");
+      const digest = crypto.createHash("sha256");
+      let bytes = 0;
+      for await (const chunk of await entry.openReadStream()) { digest.update(chunk); bytes += chunk.length; }
+      if (bytes !== file.bytes || digest.digest("hex") !== file.sha256) throw new Error(`Il file e cambiato durante il backup: ${file.path}`);
+      expected.delete(entry.filename);
+    }
+    if (expected.size) throw new Error("Backup creato incompleto");
+  } finally { await zip.close(); }
+}
 
 function safeSettings(input = {}) {
   const theme = input.theme === "light" ? "light" : "dark";
@@ -49,23 +73,31 @@ async function createBackupArchive({ libraryDir, targetPath, settings, appVersio
   if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
     throw new Error("Salva il backup fuori dalla libreria");
   }
+  for (const file of files) file.sha256 = await sha256File(file.absolute);
   const manifest = {
     format: "pianovisual-complete-backup",
     formatVersion: 1,
     createdAt: new Date().toISOString(),
     appVersion: String(appVersion || ""),
     settings: safeSettings(settings),
-    files: files.map(({ path: name, bytes }) => ({ path: name, bytes })),
+    files: files.map(({ path: name, bytes, sha256 }) => ({ path: name, bytes, sha256 })),
   };
-  const zip = new yazl.ZipFile();
-  zip.addBuffer(Buffer.from(JSON.stringify(manifest, null, 2)), "manifest.json");
-  for (const file of files) zip.addFile(file.absolute, `library/${file.path}`);
-  zip.end();
+  let handle;
+  let created = false;
   try {
-    await pipeline(zip.outputStream, fs.createWriteStream(resolvedTarget, { flags: "wx" }));
+    handle = await fsp.open(resolvedTarget, "wx");
+    created = true;
+    const zip = new yazl.ZipFile();
+    zip.addBuffer(Buffer.from(JSON.stringify(manifest, null, 2)), "manifest.json");
+    for (const file of files) zip.addFile(file.absolute, `library/${file.path}`);
+    zip.end();
+    await pipeline(zip.outputStream, handle.createWriteStream());
+    handle = null;
+    await verifyCreatedArchive(resolvedTarget, files);
     return { filePath: resolvedTarget, fileCount: files.length, bytes: (await fsp.stat(resolvedTarget)).size };
   } catch (error) {
-    if (error.code !== "EEXIST") await fsp.rm(resolvedTarget, { force: true });
+    if (handle) await handle.close().catch(() => {});
+    if (created) await fsp.rm(resolvedTarget, { force: true });
     throw error;
   }
 }
@@ -103,6 +135,10 @@ async function validateExtracted(stageRoot, seen, totalBytes) {
     expectedNames.add(name.toLowerCase());
     const actual = await fsp.stat(path.join(stageRoot, ...name.split("/")));
     if (!actual.isFile() || actual.size !== file.bytes) throw new Error(`File incompleto nel backup: ${file.path}`);
+    if (file.sha256 !== undefined && (typeof file.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(file.sha256) ||
+        await sha256File(path.join(stageRoot, ...name.split("/"))) !== file.sha256)) {
+      throw new Error(`Integrita del file non verificata: ${file.path}`);
+    }
     expectedTotal += file.bytes;
   }
   if (expectedNames.size !== seen.size || [...seen].some((name) => !expectedNames.has(name))) {
